@@ -1,3 +1,13 @@
 from django.urls import path
 
-urlpatterns = []
+from .views import RegisterAPIView
+
+app_name = "accounts"
+
+urlpatterns = [
+    path(
+        "register/",
+        RegisterAPIView.as_view(),
+        name="register",
+    ),
+]

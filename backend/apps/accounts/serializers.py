@@ -1,4 +1,4 @@
-from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
@@ -16,6 +16,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         write_only=True,
         style={"input_type": "password"},
     )
+
     confirm_password = serializers.CharField(
         write_only=True,
         style={"input_type": "password"},
@@ -38,7 +39,9 @@ class RegisterSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         value = value.lower()
 
-        if User.objects.filter(email__iexact=value).exists():
+        if User.objects.filter(
+            email__iexact=value,
+        ).exists():
             raise serializers.ValidationError(
                 "A user with this email already exists."
             )
@@ -53,7 +56,9 @@ class RegisterSerializer(serializers.ModelSerializer):
         if attrs["password"] != attrs["confirm_password"]:
             raise serializers.ValidationError(
                 {
-                    "confirm_password": "Passwords do not match."
+                    "confirm_password": (
+                        "Passwords do not match."
+                    )
                 }
             )
 
@@ -87,6 +92,7 @@ class ProfileSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
         read_only_fields = (
             "id",
             "email",
@@ -117,7 +123,9 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
             User.objects.filter(
                 phone_number=value,
             )
-            .exclude(id=self.instance.id)
+            .exclude(
+                id=self.instance.id,
+            )
             .exists()
         )
 
@@ -133,38 +141,24 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
             user=instance,
             validated_data=validated_data,
         )
+
+
 class LoginSerializer(serializers.Serializer):
+    """
+    Swagger/OpenAPI request serializer.
+
+    Authentication is handled by
+    EduCoreTokenObtainPairSerializer.
+    """
+
     email = serializers.EmailField()
+
     password = serializers.CharField(
         write_only=True,
-        style={"input_type": "password"},
+        style={
+            "input_type": "password",
+        },
     )
-
-    def validate(self, attrs):
-        email = attrs.get("email", "").lower()
-        password = attrs.get("password")
-
-        user = authenticate(
-            request=self.context.get("request"),
-            email=email,
-            password=password,
-        )
-
-        if user is None:
-            raise serializers.ValidationError(
-                "Invalid email or password."
-            )
-
-        if not user.is_active:
-            raise serializers.ValidationError(
-                "Your account has been disabled."
-            )
-
-        attrs["user"] = user
-
-        return attrs
-
-
 class ChangePasswordSerializer(serializers.Serializer):
     old_password = serializers.CharField(
         write_only=True,
@@ -181,10 +175,14 @@ class ChangePasswordSerializer(serializers.Serializer):
     def validate(self, attrs):
         user = self.context["request"].user
 
-        if not user.check_password(attrs["old_password"]):
+        if not user.check_password(
+            attrs["old_password"],
+        ):
             raise serializers.ValidationError(
                 {
-                    "old_password": "Old password is incorrect."
+                    "old_password": (
+                        "Old password is incorrect."
+                    ),
                 }
             )
 
@@ -199,7 +197,9 @@ class ChangePasswordSerializer(serializers.Serializer):
         ):
             raise serializers.ValidationError(
                 {
-                    "confirm_password": "Passwords do not match."
+                    "confirm_password": (
+                        "Passwords do not match."
+                    ),
                 }
             )
 
@@ -208,7 +208,9 @@ class ChangePasswordSerializer(serializers.Serializer):
     def save(self):
         change_password(
             user=self.context["request"].user,
-            new_password=self.validated_data["new_password"],
+            new_password=self.validated_data[
+                "new_password"
+            ],
         )
 
         return self.context["request"].user
@@ -238,10 +240,16 @@ class ForgotPasswordSerializer(serializers.Serializer):
 class ResetPasswordSerializer(serializers.Serializer):
     password = serializers.CharField(
         write_only=True,
+        style={
+            "input_type": "password",
+        },
     )
 
     confirm_password = serializers.CharField(
         write_only=True,
+        style={
+            "input_type": "password",
+        },
     )
 
     def validate(self, attrs):
@@ -255,7 +263,9 @@ class ResetPasswordSerializer(serializers.Serializer):
         ):
             raise serializers.ValidationError(
                 {
-                    "confirm_password": "Passwords do not match."
+                    "confirm_password": (
+                        "Passwords do not match."
+                    ),
                 }
             )
 

@@ -27,10 +27,11 @@ INSTALLED_APPS = [
     "drf_spectacular",
 
     # Project Apps
-    "common",
+    "apps.common",
     "apps.accounts",
     "apps.courses",
     "apps.enrollments",
+    "django_filters",
 ]
 
 MIDDLEWARE = [
@@ -112,6 +113,9 @@ REST_FRAMEWORK = {
         "rest_framework.parsers.JSONParser",
         "rest_framework.parsers.MultiPartParser",
         "rest_framework.parsers.FormParser",
+    ],
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
     ],
 }
 

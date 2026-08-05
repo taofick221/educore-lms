@@ -1,0 +1,1 @@
+DEFAULT_PROFILE_IMAGE = "profiles/default.png"

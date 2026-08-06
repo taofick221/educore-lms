@@ -36,8 +36,8 @@ class IsCourseOwner(BasePermission):
 
 class IsInstructorOrReadOnly(BasePermission):
     """
-    Everyone can read.
-    Only instructors can create/update.
+    Anyone can read.
+    Only instructors can create.
     """
 
     message = "Only instructors can modify courses."
@@ -59,7 +59,7 @@ class IsInstructorOrReadOnly(BasePermission):
 class IsAdminOrCourseOwner(BasePermission):
     """
     Admin has full access.
-    Instructor can manage only their own courses.
+    Instructor can manage only their own course.
     """
 
     message = "Permission denied."
@@ -74,3 +74,147 @@ class IsAdminOrCourseOwner(BasePermission):
             return True
 
         return obj.instructor == request.user
+
+
+# ==========================================================
+# Section Permissions
+# ==========================================================
+
+
+class IsSectionOwner(BasePermission):
+    """
+    Allow only the course owner to manage sections.
+    """
+
+    message = "You do not own this section."
+
+    def has_object_permission(
+        self,
+        request,
+        view,
+        obj,
+    ):
+        if request.user.is_staff:
+            return True
+
+        return obj.course.instructor == request.user
+
+
+class IsInstructorOrSectionReadOnly(BasePermission):
+    """
+    Anyone can read.
+    Only instructors can create/update sections.
+    """
+
+    message = "Only instructors can manage sections."
+
+    def has_permission(
+        self,
+        request,
+        view,
+    ):
+        if request.method in SAFE_METHODS:
+            return True
+
+        return (
+            request.user.is_authenticated
+            and request.user.role == "instructor"
+        )
+
+
+# ==========================================================
+# Lecture Permissions
+# ==========================================================
+
+
+class IsLectureOwner(BasePermission):
+    """
+    Allow only the course owner to manage lectures.
+    """
+
+    message = "You do not own this lecture."
+
+    def has_object_permission(
+        self,
+        request,
+        view,
+        obj,
+    ):
+        if request.user.is_staff:
+            return True
+
+        return (
+            obj.section.course.instructor
+            == request.user
+        )
+
+
+class IsInstructorOrLectureReadOnly(BasePermission):
+    """
+    Anyone can read.
+    Only instructors can manage lectures.
+    """
+
+    message = "Only instructors can manage lectures."
+
+    def has_permission(
+        self,
+        request,
+        view,
+    ):
+        if request.method in SAFE_METHODS:
+            return True
+
+        return (
+            request.user.is_authenticated
+            and request.user.role == "instructor"
+        )
+
+
+# ==========================================================
+# Resource Permissions
+# ==========================================================
+
+
+class IsResourceOwner(BasePermission):
+    """
+    Allow only the course owner to manage resources.
+    """
+
+    message = "You do not own this resource."
+
+    def has_object_permission(
+        self,
+        request,
+        view,
+        obj,
+    ):
+        if request.user.is_staff:
+            return True
+
+        return (
+            obj.lecture.section.course.instructor
+            == request.user
+        )
+
+
+class IsInstructorOrResourceReadOnly(BasePermission):
+    """
+    Anyone can read.
+    Only instructors can manage resources.
+    """
+
+    message = "Only instructors can manage resources."
+
+    def has_permission(
+        self,
+        request,
+        view,
+    ):
+        if request.method in SAFE_METHODS:
+            return True
+
+        return (
+            request.user.is_authenticated
+            and request.user.role == "instructor"
+        )

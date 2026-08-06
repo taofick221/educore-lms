@@ -5,23 +5,36 @@ from .models import (
     Course,
     CourseFeature,
     LearningOutcome,
+    Lecture,
     Requirement,
+    Resource,
+    Section,
 )
+
+
+# ==========================================================
+# Inlines
+# ==========================================================
 
 
 class CourseFeatureInline(admin.TabularInline):
     model = CourseFeature
-    extra = 1
+    extra = 0
 
 
 class LearningOutcomeInline(admin.TabularInline):
     model = LearningOutcome
-    extra = 1
+    extra = 0
 
 
 class RequirementInline(admin.TabularInline):
     model = Requirement
-    extra = 1
+    extra = 0
+
+
+# ==========================================================
+# Category Admin
+# ==========================================================
 
 
 @admin.register(Category)
@@ -34,6 +47,7 @@ class CategoryAdmin(admin.ModelAdmin):
 
     list_filter = (
         "is_active",
+        "created_at",
     )
 
     search_fields = (
@@ -55,6 +69,13 @@ class CategoryAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+
+
+# ==========================================================
+# Course Admin
+# ==========================================================
+
+
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
     list_display = (
@@ -67,6 +88,7 @@ class CourseAdmin(admin.ModelAdmin):
         "status",
         "is_featured",
         "is_published",
+        "is_active",
         "created_at",
     )
 
@@ -85,8 +107,10 @@ class CourseAdmin(admin.ModelAdmin):
         "title",
         "subtitle",
         "description",
-        "instructor__email",
         "category__name",
+        "instructor__email",
+        "instructor__first_name",
+        "instructor__last_name",
     )
 
     autocomplete_fields = (
@@ -192,4 +216,229 @@ class CourseAdmin(admin.ModelAdmin):
                 ),
             },
         ),
+    )
+
+# ==========================================================
+# Section Admin
+# ==========================================================
+
+
+@admin.register(Section)
+class SectionAdmin(admin.ModelAdmin):
+    list_display = (
+        "title",
+        "course",
+        "order",
+        "is_published",
+        "is_active",
+        "created_at",
+    )
+
+    list_filter = (
+        "is_published",
+        "is_active",
+        "created_at",
+    )
+
+    search_fields = (
+        "title",
+        "description",
+        "course__title",
+    )
+
+    autocomplete_fields = (
+        "course",
+    )
+
+    prepopulated_fields = {
+        "slug": (
+            "title",
+        ),
+    }
+
+    ordering = (
+        "course",
+        "order",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+    )
+
+
+# ==========================================================
+# Lecture Admin
+# ==========================================================
+
+
+@admin.register(Lecture)
+class LectureAdmin(admin.ModelAdmin):
+    list_display = (
+        "title",
+        "section",
+        "duration",
+        "order",
+        "is_preview",
+        "is_published",
+        "is_active",
+    )
+
+    list_filter = (
+        "is_preview",
+        "is_published",
+        "is_active",
+    )
+
+    search_fields = (
+        "title",
+        "description",
+        "section__title",
+        "section__course__title",
+    )
+
+    autocomplete_fields = (
+        "section",
+    )
+
+    prepopulated_fields = {
+        "slug": (
+            "title",
+        ),
+    }
+
+    ordering = (
+        "section",
+        "order",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+    )
+
+
+# ==========================================================
+# Resource Admin
+# ==========================================================
+
+
+@admin.register(Resource)
+class ResourceAdmin(admin.ModelAdmin):
+    list_display = (
+        "title",
+        "lecture",
+        "resource_type",
+        "order",
+        "created_at",
+    )
+
+    list_filter = (
+        "resource_type",
+        "created_at",
+    )
+
+    search_fields = (
+        "title",
+        "lecture__title",
+        "lecture__section__title",
+        "lecture__section__course__title",
+    )
+
+    autocomplete_fields = (
+        "lecture",
+    )
+
+    ordering = (
+        "lecture",
+        "order",
+    )
+
+    readonly_fields = (
+        "created_at",
+        "updated_at",
+    )
+
+
+# ==========================================================
+# Course Feature Admin
+# ==========================================================
+
+
+@admin.register(CourseFeature)
+class CourseFeatureAdmin(admin.ModelAdmin):
+    list_display = (
+        "title",
+        "course",
+        "created_at",
+    )
+
+    search_fields = (
+        "title",
+        "course__title",
+    )
+
+    autocomplete_fields = (
+        "course",
+    )
+
+    ordering = (
+        "course",
+        "id",
+    )
+
+
+# ==========================================================
+# Requirement Admin
+# ==========================================================
+
+
+@admin.register(Requirement)
+class RequirementAdmin(admin.ModelAdmin):
+    list_display = (
+        "title",
+        "course",
+        "created_at",
+    )
+
+    search_fields = (
+        "title",
+        "course__title",
+    )
+
+    autocomplete_fields = (
+        "course",
+    )
+
+    ordering = (
+        "course",
+        "id",
+    )
+
+
+# ==========================================================
+# Learning Outcome Admin
+# ==========================================================
+
+
+@admin.register(LearningOutcome)
+class LearningOutcomeAdmin(admin.ModelAdmin):
+    list_display = (
+        "title",
+        "course",
+        "created_at",
+    )
+
+    search_fields = (
+        "title",
+        "course__title",
+    )
+
+    autocomplete_fields = (
+        "course",
+    )
+
+    ordering = (
+        "course",
+        "id",
     )

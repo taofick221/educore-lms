@@ -1,18 +1,25 @@
 from django.db import transaction
+from django.utils import timezone
 
+from .choices import CourseStatus
 from .models import (
     Category,
     Course,
+    Lecture,
+    Resource,
+    Section,
 )
-from django.db import transaction
-from django.utils import timezone
 
+
+# ==========================================================
+# Category Services
+# ==========================================================
 
 
 @transaction.atomic
 def create_category(*, validated_data):
     """
-    Create a new course category.
+    Create a new category.
     """
 
     return Category.objects.create(
@@ -23,30 +30,17 @@ def create_category(*, validated_data):
 @transaction.atomic
 def update_category(*, category, validated_data):
     """
-    Update category information.
+    Update category.
     """
 
     for field, value in validated_data.items():
-        setattr(category, field, value)
+        setattr(
+            category,
+            field,
+            value,
+        )
 
     category.save()
-
-    return category
-
-
-@transaction.atomic
-def deactivate_category(*, category):
-    """
-    Soft deactivate category.
-    """
-
-    category.is_active = False
-
-    category.save(
-        update_fields=[
-            "is_active",
-        ],
-    )
 
     return category
 
@@ -69,9 +63,31 @@ def activate_category(*, category):
 
 
 @transaction.atomic
+def deactivate_category(*, category):
+    """
+    Deactivate category.
+    """
+
+    category.is_active = False
+
+    category.save(
+        update_fields=[
+            "is_active",
+        ],
+    )
+
+    return category
+
+
+# ==========================================================
+# Course Services
+# ==========================================================
+
+
+@transaction.atomic
 def create_course(*, validated_data):
     """
-    Create a new course.
+    Create course.
     """
 
     return Course.objects.create(
@@ -82,11 +98,15 @@ def create_course(*, validated_data):
 @transaction.atomic
 def update_course(*, course, validated_data):
     """
-    Update course information.
+    Update course.
     """
 
     for field, value in validated_data.items():
-        setattr(course, field, value)
+        setattr(
+            course,
+            field,
+            value,
+        )
 
     course.save()
 
@@ -99,7 +119,7 @@ def publish_course(*, course):
     Publish course.
     """
 
-    course.status = "published"
+    course.status = CourseStatus.PUBLISHED
     course.is_published = True
     course.published_at = timezone.now()
 
@@ -120,7 +140,7 @@ def unpublish_course(*, course):
     Unpublish course.
     """
 
-    course.status = "draft"
+    course.status = CourseStatus.DRAFT
     course.is_published = False
     course.published_at = None
 
@@ -134,6 +154,10 @@ def unpublish_course(*, course):
 
     return course
 
+# ==========================================================
+# Course Management Services
+# ==========================================================
+
 
 @transaction.atomic
 def archive_course(*, course):
@@ -141,7 +165,7 @@ def archive_course(*, course):
     Archive course.
     """
 
-    course.status = "archived"
+    course.status = CourseStatus.ARCHIVED
     course.is_active = False
 
     course.save(
@@ -186,3 +210,207 @@ def unfeature_course(*, course):
     )
 
     return course
+
+
+# ==========================================================
+# Section Services
+# ==========================================================
+
+
+@transaction.atomic
+def create_section(*, validated_data):
+    """
+    Create section.
+    """
+
+    return Section.objects.create(
+        **validated_data,
+    )
+
+
+@transaction.atomic
+def update_section(*, section, validated_data):
+    """
+    Update section.
+    """
+
+    for field, value in validated_data.items():
+        setattr(
+            section,
+            field,
+            value,
+        )
+
+    section.save()
+
+    return section
+
+
+@transaction.atomic
+def publish_section(*, section):
+    """
+    Publish section.
+    """
+
+    section.is_published = True
+
+    section.save(
+        update_fields=[
+            "is_published",
+        ],
+    )
+
+    return section
+
+
+@transaction.atomic
+def unpublish_section(*, section):
+    """
+    Unpublish section.
+    """
+
+    section.is_published = False
+
+    section.save(
+        update_fields=[
+            "is_published",
+        ],
+    )
+
+    return section
+
+# ==========================================================
+# Lecture Services
+# ==========================================================
+
+
+@transaction.atomic
+def create_lecture(*, validated_data):
+    """
+    Create lecture.
+    """
+
+    return Lecture.objects.create(
+        **validated_data,
+    )
+
+
+@transaction.atomic
+def update_lecture(*, lecture, validated_data):
+    """
+    Update lecture.
+    """
+
+    for field, value in validated_data.items():
+        setattr(
+            lecture,
+            field,
+            value,
+        )
+
+    lecture.save()
+
+    return lecture
+
+
+@transaction.atomic
+def publish_lecture(*, lecture):
+    """
+    Publish lecture.
+    """
+
+    lecture.is_published = True
+
+    lecture.save(
+        update_fields=[
+            "is_published",
+        ],
+    )
+
+    return lecture
+
+
+@transaction.atomic
+def unpublish_lecture(*, lecture):
+    """
+    Unpublish lecture.
+    """
+
+    lecture.is_published = False
+
+    lecture.save(
+        update_fields=[
+            "is_published",
+        ],
+    )
+
+    return lecture
+
+
+# ==========================================================
+# Resource Services
+# ==========================================================
+
+
+@transaction.atomic
+def create_resource(*, validated_data):
+    """
+    Create resource.
+    """
+
+    return Resource.objects.create(
+        **validated_data,
+    )
+
+
+@transaction.atomic
+def update_resource(*, resource, validated_data):
+    """
+    Update resource.
+    """
+
+    for field, value in validated_data.items():
+        setattr(
+            resource,
+            field,
+            value,
+        )
+
+    resource.save()
+
+    return resource
+
+
+@transaction.atomic
+def activate_resource(*, resource):
+    """
+    Activate resource.
+    """
+
+    resource.is_active = True
+
+    resource.save(
+        update_fields=[
+            "is_active",
+        ],
+    )
+
+    return resource
+
+
+@transaction.atomic
+def deactivate_resource(*, resource):
+    """
+    Deactivate resource.
+    """
+
+    resource.is_active = False
+
+    resource.save(
+        update_fields=[
+            "is_active",
+        ],
+    )
+
+    return resource
+

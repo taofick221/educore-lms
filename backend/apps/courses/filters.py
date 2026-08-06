@@ -9,16 +9,6 @@ from .models import Course
 
 
 class CourseFilter(django_filters.FilterSet):
-    min_price = django_filters.NumberFilter(
-        field_name="price",
-        lookup_expr="gte",
-    )
-
-    max_price = django_filters.NumberFilter(
-        field_name="price",
-        lookup_expr="lte",
-    )
-
     category = django_filters.UUIDFilter(
         field_name="category__id",
     )
@@ -43,6 +33,26 @@ class CourseFilter(django_filters.FilterSet):
 
     is_published = django_filters.BooleanFilter()
 
+    min_price = django_filters.NumberFilter(
+        field_name="price",
+        lookup_expr="gte",
+    )
+
+    max_price = django_filters.NumberFilter(
+        field_name="price",
+        lookup_expr="lte",
+    )
+
+    min_duration = django_filters.NumberFilter(
+        field_name="duration",
+        lookup_expr="gte",
+    )
+
+    max_duration = django_filters.NumberFilter(
+        field_name="duration",
+        lookup_expr="lte",
+    )
+
     created_after = django_filters.DateFilter(
         field_name="created_at",
         lookup_expr="date__gte",
@@ -51,14 +61,6 @@ class CourseFilter(django_filters.FilterSet):
     created_before = django_filters.DateFilter(
         field_name="created_at",
         lookup_expr="date__lte",
-    )
-
-    ordering = django_filters.OrderingFilter(
-        fields=(
-            ("created_at", "created_at"),
-            ("price", "price"),
-            ("title", "title"),
-        ),
     )
 
     class Meta:
@@ -73,3 +75,4 @@ class CourseFilter(django_filters.FilterSet):
             "is_featured",
             "is_published",
         )
+

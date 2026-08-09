@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.courses",
     "apps.enrollments",
+    "apps.orders",
     "django_filters",
 ]
 

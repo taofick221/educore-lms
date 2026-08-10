@@ -20,16 +20,40 @@ from .models import (
 class CourseFeatureInline(admin.TabularInline):
     model = CourseFeature
     extra = 0
+    fields = (
+        "title",
+    )
 
 
 class LearningOutcomeInline(admin.TabularInline):
     model = LearningOutcome
     extra = 0
+    fields = (
+        "title",
+    )
 
 
 class RequirementInline(admin.TabularInline):
     model = Requirement
     extra = 0
+    fields = (
+        "title",
+    )
+
+
+class SectionInline(admin.TabularInline):
+    model = Section
+    extra = 0
+    fields = (
+        "title",
+        "slug",
+        "order",
+        "is_published",
+        "is_active",
+    )
+    prepopulated_fields = {
+        "slug": ("title",),
+    }
 
 
 # ==========================================================
@@ -138,6 +162,7 @@ class CourseAdmin(admin.ModelAdmin):
         CourseFeatureInline,
         LearningOutcomeInline,
         RequirementInline,
+        SectionInline,
     ]
 
     fieldsets = (
@@ -217,6 +242,7 @@ class CourseAdmin(admin.ModelAdmin):
             },
         ),
     )
+
 
 # ==========================================================
 # Section Admin

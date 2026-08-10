@@ -78,54 +78,61 @@ class CourseProgress(TimeStampedModel):
             models.Index(
                 fields=[
                     "enrollment",
-                ]
+                ],
             ),
             models.Index(
                 fields=[
                     "progress_percentage",
-                ]
+                ],
             ),
             models.Index(
                 fields=[
                     "completed_at",
-                ]
+                ],
             ),
         ]
 
         constraints = [
             models.CheckConstraint(
-                check=models.Q(
-                    progress_percentage__gte=0,
-                )
-                & models.Q(
-                    progress_percentage__lte=100,
+                check=(
+                    models.Q(
+                        progress_percentage__gte=0,
+                    )
+                    & models.Q(
+                        progress_percentage__lte=100,
+                    )
                 ),
                 name="valid_course_progress_percentage",
             ),
+
             models.CheckConstraint(
                 check=models.Q(
                     completed_sections__gte=0,
                 ),
                 name="valid_completed_sections",
             ),
+
             models.CheckConstraint(
                 check=models.Q(
                     completed_lectures__gte=0,
                 ),
                 name="valid_completed_lectures",
             ),
+
             models.CheckConstraint(
                 check=models.Q(
                     total_sections__gte=0,
                 ),
                 name="valid_total_sections",
             ),
+
             models.CheckConstraint(
                 check=models.Q(
                     total_lectures__gte=0,
                 ),
                 name="valid_total_lectures",
             ),
+
             models.CheckConstraint(
                 check=models.Q(
                     completed_sections__lte=F(
@@ -134,6 +141,7 @@ class CourseProgress(TimeStampedModel):
                 ),
                 name="completed_sections_lte_total_sections",
             ),
+
             models.CheckConstraint(
                 check=models.Q(
                     completed_lectures__lte=F(
@@ -146,10 +154,16 @@ class CourseProgress(TimeStampedModel):
 
     @property
     def is_completed(self):
-        return self.progress_percentage == 100
+        """
+        Returns True when the course is 100% complete.
+        """
+        return self.progress_percentage >= 100
 
     @property
     def completion_rate(self):
+        """
+        Returns the current course completion percentage.
+        """
         return self.progress_percentage
 
     def __str__(self):

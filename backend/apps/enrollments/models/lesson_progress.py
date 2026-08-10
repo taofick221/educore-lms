@@ -65,22 +65,22 @@ class LessonProgress(TimeStampedModel):
             models.Index(
                 fields=[
                     "enrollment",
-                ]
+                ],
             ),
             models.Index(
                 fields=[
                     "lecture",
-                ]
+                ],
             ),
             models.Index(
                 fields=[
                     "is_completed",
-                ]
+                ],
             ),
             models.Index(
                 fields=[
                     "watch_percentage",
-                ]
+                ],
             ),
         ]
 
@@ -92,15 +92,19 @@ class LessonProgress(TimeStampedModel):
                 ],
                 name="unique_enrollment_lecture_progress",
             ),
+
             models.CheckConstraint(
-                check=models.Q(
-                    watch_percentage__gte=0,
-                )
-                & models.Q(
-                    watch_percentage__lte=100,
+                check=(
+                    models.Q(
+                        watch_percentage__gte=0,
+                    )
+                    & models.Q(
+                        watch_percentage__lte=100,
+                    )
                 ),
                 name="valid_watch_percentage",
             ),
+
             models.CheckConstraint(
                 check=models.Q(
                     last_watched_second__gte=0,
@@ -108,6 +112,13 @@ class LessonProgress(TimeStampedModel):
                 name="valid_last_watched_second",
             ),
         ]
+
+    @property
+    def is_finished(self):
+        """
+        Returns True when the lesson is completed.
+        """
+        return self.is_completed or self.watch_percentage >= 100
 
     def __str__(self):
         return (

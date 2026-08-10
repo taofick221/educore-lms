@@ -44,8 +44,23 @@ class EnrollmentListSerializer(
         read_only=True,
     )
 
+    course_slug = serializers.CharField(
+        source="course.slug",
+        read_only=True,
+    )
+
     progress_percentage = serializers.IntegerField(
         source="course_progress.progress_percentage",
+        read_only=True,
+    )
+
+    completed_lectures = serializers.IntegerField(
+        source="course_progress.completed_lectures",
+        read_only=True,
+    )
+
+    total_lectures = serializers.IntegerField(
+        source="course_progress.total_lectures",
         read_only=True,
     )
 
@@ -57,8 +72,11 @@ class EnrollmentListSerializer(
             "student_name",
             "student_email",
             "course_title",
+            "course_slug",
             "status",
             "progress_percentage",
+            "completed_lectures",
+            "total_lectures",
             "certificate_issued",
             "is_active",
             "enrolled_at",
@@ -85,8 +103,28 @@ class EnrollmentDetailSerializer(
         read_only=True,
     )
 
+    course_slug = serializers.CharField(
+        source="course.slug",
+        read_only=True,
+    )
+
     progress_percentage = serializers.IntegerField(
         source="course_progress.progress_percentage",
+        read_only=True,
+    )
+
+    completed_lectures = serializers.IntegerField(
+        source="course_progress.completed_lectures",
+        read_only=True,
+    )
+
+    total_lectures = serializers.IntegerField(
+        source="course_progress.total_lectures",
+        read_only=True,
+    )
+
+    total_sections = serializers.IntegerField(
+        source="course_progress.total_sections",
         read_only=True,
     )
 
@@ -100,8 +138,12 @@ class EnrollmentDetailSerializer(
             "student_email",
             "course",
             "course_title",
+            "course_slug",
             "status",
             "progress_percentage",
+            "completed_lectures",
+            "total_lectures",
+            "total_sections",
             "certificate_issued",
             "is_active",
             "enrolled_at",
@@ -113,22 +155,7 @@ class EnrollmentDetailSerializer(
             "updated_at",
         )
 
-        read_only_fields = (
-            "id",
-            "student",
-            "student_name",
-            "student_email",
-            "course",
-            "course_title",
-            "status",
-            "progress_percentage",
-            "certificate_issued",
-            "enrolled_at",
-            "started_at",
-            "completed_at",
-            "created_at",
-            "updated_at",
-        )
+        read_only_fields = fields
 
 
 class CreateEnrollmentSerializer(
@@ -169,41 +196,33 @@ class CreateEnrollmentSerializer(
                 }
             )
 
-        if (
-            course.status
-            != CourseStatus.PUBLISHED
-        ):
+        if course.status != CourseStatus.PUBLISHED:
             raise serializers.ValidationError(
                 {
                     "course": (
-                        "Course is unavailable."
+                        "This course is not available "
+                        "for enrollment."
                     )
                 }
             )
 
-        if (
-            course.instructor
-            == student
-        ):
-            raise serializers.ValidationError(
-                {
-                    "course": (
-                        "You cannot enroll in your own course."
-                    )
-                }
-            )
+        existing_enrollment = (
+            Enrollment.objects.filter(
+                student=student,
+                course=course,
+            ).first()
+        )
 
-        if Enrollment.objects.filter(
-            student=student,
-            course=course,
-        ).exists():
-            raise serializers.ValidationError(
-                {
-                    "course": (
-                        "You are already enrolled."
-                    )
-                }
-            )
+        if existing_enrollment:
+            if existing_enrollment.is_active:
+                raise serializers.ValidationError(
+                    {
+                        "course": (
+                            "You are already enrolled "
+                            "in this course."
+                        )
+                    }
+                )
 
         return attrs
 
@@ -211,14 +230,15 @@ class CreateEnrollmentSerializer(
         self,
         validated_data,
     ):
-        validated_data[
-            "student"
-        ] = self.context[
+        student = self.context[
             "request"
         ].user
 
         return create_enrollment(
-            validated_data=validated_data,
+            validated_data={
+                **validated_data,
+                "student": student,
+            },
         )
 
 
@@ -230,9 +250,10 @@ class UpdateEnrollmentSerializer(
 
         fields = (
             "status",
-            "certificate_issued",
-            "is_active",
             "expires_at",
+            "last_accessed_at",
+            "is_active",
+            "certificate_issued",
         )
 
     def update(
@@ -240,15 +261,11 @@ class UpdateEnrollmentSerializer(
         instance,
         validated_data,
     ):
-        status = validated_data.pop(
-            "status",
-            None,
+        status = validated_data.get(
+            "status"
         )
 
-        if (
-            status
-            == EnrollmentStatus.ACTIVE
-        ):
+        if status == EnrollmentStatus.ACTIVE:
             activate_enrollment(
                 enrollment=instance,
             )
@@ -292,7 +309,6 @@ class UpdateEnrollmentSerializer(
         return instance
 
 
-
 # ==========================================================
 # Lesson Progress Serializers
 # ==========================================================
@@ -321,6 +337,7 @@ class LessonProgressSerializer(
 
         fields = (
             "id",
+            "enrollment",
             "lecture",
             "lecture_title",
             "section_title",
@@ -335,6 +352,8 @@ class LessonProgressSerializer(
 
         read_only_fields = (
             "id",
+            "enrollment",
+            "lecture",
             "completed_at",
             "created_at",
             "updated_at",
@@ -354,13 +373,36 @@ class CreateLessonProgressSerializer(
             "watch_percentage",
         )
 
+        validators = []
+
     def validate(
         self,
         attrs,
     ):
-        enrollment = attrs["enrollment"]
+        request = self.context[
+            "request"
+        ]
 
+        enrollment = attrs["enrollment"]
         lecture = attrs["lecture"]
+
+        if enrollment.student != request.user:
+            raise serializers.ValidationError(
+                {
+                    "enrollment": (
+                        "You do not own this enrollment."
+                    )
+                }
+            )
+
+        if not enrollment.is_active:
+            raise serializers.ValidationError(
+                {
+                    "enrollment": (
+                        "This enrollment is inactive."
+                    )
+                }
+            )
 
         if (
             lecture.section.course
@@ -371,6 +413,24 @@ class CreateLessonProgressSerializer(
                     "lecture": (
                         "Lecture does not belong "
                         "to this course."
+                    )
+                }
+            )
+
+        if not lecture.is_active:
+            raise serializers.ValidationError(
+                {
+                    "lecture": (
+                        "This lecture is inactive."
+                    )
+                }
+            )
+
+        if not lecture.is_published:
+            raise serializers.ValidationError(
+                {
+                    "lecture": (
+                        "This lecture is not published."
                     )
                 }
             )
@@ -396,6 +456,27 @@ class UpdateLessonProgressSerializer(
             "last_watched_second",
             "watch_percentage",
         )
+
+    def validate(
+        self,
+        attrs,
+    ):
+        watch_percentage = attrs.get(
+            "watch_percentage"
+        )
+
+        if watch_percentage is not None:
+            if not 0 <= watch_percentage <= 100:
+                raise serializers.ValidationError(
+                    {
+                        "watch_percentage": (
+                            "Watch percentage must "
+                            "be between 0 and 100."
+                        )
+                    }
+                )
+
+        return attrs
 
     def update(
         self,

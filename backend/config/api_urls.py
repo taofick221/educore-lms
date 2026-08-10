@@ -16,4 +16,8 @@ urlpatterns = [
         "orders/",
         include("apps.orders.urls"),
     ),
+    path(
+        "enrollments/",
+        include("apps.enrollments.urls"),
+    ),
 ]

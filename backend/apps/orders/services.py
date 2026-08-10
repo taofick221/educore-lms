@@ -2,6 +2,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.enrollments.services import create_enrollment
+from apps.enrollments.models import Enrollment
 
 from .choices import OrderStatus
 from .exceptions import (
@@ -24,6 +25,12 @@ def create_order(
 ):
     """
     Create an order and its order items atomically.
+
+    Business rules:
+    - A student cannot order a course they already have.
+    - A student cannot create another order while a previous
+      order for the same course is still pending.
+    - Cancelled or rejected orders can be recreated.
     """
 
     if not courses:
@@ -31,10 +38,61 @@ def create_order(
             "At least one course is required."
         )
 
+    # Remove duplicate courses from the same request.
+    unique_courses = {
+        course.id: course
+        for course in courses
+    }
+
+    courses = list(unique_courses.values())
+
+    # ----------------------------------------------------------
+    # Prevent duplicate enrollment / pending orders
+    # ----------------------------------------------------------
+
+    for course in courses:
+
+        # Already enrolled?
+        enrollment_exists = Enrollment.objects.filter(
+            student=student,
+            course=course,
+        ).exists()
+
+        if enrollment_exists:
+            raise AlreadyEnrolled(
+                f"You are already enrolled in "
+                f"course: {course.title}"
+            )
+
+        # Existing pending order?
+        pending_order_exists = (
+            Order.objects
+            .filter(
+                student=student,
+                status=OrderStatus.PENDING,
+                items__course=course,
+            )
+            .exists()
+        )
+
+        if pending_order_exists:
+            raise OrderAlreadyProcessed(
+                f"You already have a pending order "
+                f"for course: {course.title}"
+            )
+
+    # ----------------------------------------------------------
+    # Calculate total
+    # ----------------------------------------------------------
+
     total_amount = sum(
         course.price
         for course in courses
     )
+
+    # ----------------------------------------------------------
+    # Create order
+    # ----------------------------------------------------------
 
     order = Order.objects.create(
         student=student,
@@ -44,6 +102,10 @@ def create_order(
         notes=notes,
         status=OrderStatus.PENDING,
     )
+
+    # ----------------------------------------------------------
+    # Create order items
+    # ----------------------------------------------------------
 
     OrderItem.objects.bulk_create(
         [
@@ -77,7 +139,8 @@ def verify_payment(
 
     if order.status != OrderStatus.PENDING:
         raise InvalidOrderStatusTransition(
-            "Only pending orders can have their payment verified."
+            "Only pending orders can have "
+            "their payment verified."
         )
 
     if order.payment_verified:
@@ -131,19 +194,41 @@ def approve_order(
     )
 
     for item in order_items:
-        if item.course.instructor_id == order.student_id:
+
+        # A student cannot enroll in their own course.
+        if (
+            item.course.instructor_id
+            == order.student_id
+        ):
             raise AlreadyEnrolled(
-                "A student cannot enroll in their own course."
+                "A student cannot enroll in "
+                "their own course."
+            )
+
+        # Extra protection before creating enrollment.
+        existing_enrollment = (
+            Enrollment.objects
+            .filter(
+                student=order.student,
+                course=item.course,
+            )
+            .first()
+        )
+
+        if existing_enrollment:
+            raise AlreadyEnrolled(
+                f"Already enrolled in course: "
+                f"{item.course.title}"
             )
 
         try:
-            with transaction.atomic():
-                create_enrollment(
-                    validated_data={
-                        "student": order.student,
-                        "course": item.course,
-                    }
-                )
+            create_enrollment(
+                validated_data={
+                    "student": order.student,
+                    "course": item.course,
+                }
+            )
+
         except IntegrityError as exc:
             raise AlreadyEnrolled(
                 f"Already enrolled in course: "

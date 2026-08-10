@@ -54,7 +54,9 @@ def activate_enrollment(
     if enrollment.status == EnrollmentStatus.ACTIVE:
         return enrollment
 
-    enrollment.status = EnrollmentStatus.ACTIVE
+    enrollment.status = (
+        EnrollmentStatus.ACTIVE
+    )
 
     enrollment.is_active = True
 
@@ -89,7 +91,9 @@ def cancel_enrollment(
         )
     )
 
-    enrollment.status = EnrollmentStatus.CANCELLED
+    enrollment.status = (
+        EnrollmentStatus.CANCELLED
+    )
 
     enrollment.is_active = False
 
@@ -120,7 +124,9 @@ def expire_enrollment(
         )
     )
 
-    enrollment.status = EnrollmentStatus.EXPIRED
+    enrollment.status = (
+        EnrollmentStatus.EXPIRED
+    )
 
     enrollment.is_active = False
 
@@ -151,12 +157,19 @@ def complete_enrollment(
         )
     )
 
-    if enrollment.status == EnrollmentStatus.COMPLETED:
+    if (
+        enrollment.status
+        == EnrollmentStatus.COMPLETED
+    ):
         return enrollment
 
-    enrollment.status = EnrollmentStatus.COMPLETED
+    enrollment.status = (
+        EnrollmentStatus.COMPLETED
+    )
 
-    enrollment.completed_at = timezone.now()
+    enrollment.completed_at = (
+        timezone.now()
+    )
 
     enrollment.certificate_issued = True
 
@@ -213,12 +226,127 @@ def create_lesson_progress(
     validated_data,
 ):
     """
-    Create lesson progress.
+    Create or update lesson progress.
+
+    The combination of enrollment + lecture
+    must remain unique.
+
+    If progress already exists, it is updated.
+    Otherwise a new record is created.
+
+    When watch percentage reaches 100%, the
+    lesson is marked completed and course
+    progress is recalculated.
     """
 
-    return LessonProgress.objects.create(
-        **validated_data,
+    enrollment = validated_data[
+        "enrollment"
+    ]
+
+    lecture = validated_data[
+        "lecture"
+    ]
+
+    last_watched_second = (
+        validated_data.get(
+            "last_watched_second",
+            0,
+        )
     )
+
+    watch_percentage = (
+        validated_data.get(
+            "watch_percentage",
+            0,
+        )
+    )
+
+    # ------------------------------------------------------
+    # Lock the enrollment.
+    #
+    # This prevents two simultaneous requests
+    # for the same enrollment from creating
+    # duplicate lesson progress records.
+    # ------------------------------------------------------
+
+    enrollment = (
+        Enrollment.objects
+        .select_for_update()
+        .get(
+            pk=enrollment.pk,
+        )
+    )
+
+    # ------------------------------------------------------
+    # Find existing progress
+    # ------------------------------------------------------
+
+    lesson_progress = (
+        LessonProgress.objects
+        .select_for_update()
+        .filter(
+            enrollment=enrollment,
+            lecture=lecture,
+        )
+        .first()
+    )
+
+    # ------------------------------------------------------
+    # Create if it does not exist
+    # ------------------------------------------------------
+
+    if lesson_progress is None:
+        lesson_progress = (
+            LessonProgress.objects.create(
+                enrollment=enrollment,
+                lecture=lecture,
+                last_watched_second=(
+                    last_watched_second
+                ),
+                watch_percentage=(
+                    watch_percentage
+                ),
+            )
+        )
+
+    # ------------------------------------------------------
+    # Update existing progress
+    # ------------------------------------------------------
+
+    else:
+        lesson_progress.last_watched_second = (
+            last_watched_second
+        )
+
+        lesson_progress.watch_percentage = (
+            watch_percentage
+        )
+
+    # ------------------------------------------------------
+    # Mark completed
+    # ------------------------------------------------------
+
+    if (
+        watch_percentage >= 100
+        and not lesson_progress.is_completed
+    ):
+        lesson_progress.is_completed = True
+
+        lesson_progress.completed_at = (
+            timezone.now()
+        )
+
+    lesson_progress.save()
+
+    # ------------------------------------------------------
+    # Recalculate course progress
+    # ------------------------------------------------------
+
+    update_course_completion(
+        enrollment=enrollment,
+    )
+
+    return lesson_progress
 
 
 @transaction.atomic
@@ -228,7 +356,8 @@ def update_lesson_progress(
     validated_data,
 ):
     """
-    Update lesson progress.
+    Update lesson progress and recalculate
+    course progress.
     """
 
     lesson_progress = (
@@ -243,7 +372,10 @@ def update_lesson_progress(
         )
     )
 
-    for field, value in validated_data.items():
+    for (
+        field,
+        value,
+    ) in validated_data.items():
         setattr(
             lesson_progress,
             field,
@@ -251,7 +383,8 @@ def update_lesson_progress(
         )
 
     if (
-        lesson_progress.watch_percentage >= 100
+        lesson_progress.watch_percentage
+        >= 100
         and not lesson_progress.is_completed
     ):
         lesson_progress.is_completed = True
@@ -262,6 +395,10 @@ def update_lesson_progress(
 
     lesson_progress.save()
 
+    update_course_completion(
+        enrollment=lesson_progress.enrollment,
+    )
+
     return lesson_progress
 
 
@@ -271,7 +408,8 @@ def complete_lesson(
     lesson_progress,
 ):
     """
-    Complete lesson and recalculate course progress.
+    Complete lesson and recalculate
+    course progress.
     """
 
     lesson_progress = (
@@ -326,6 +464,10 @@ def resume_lesson(
     lesson_progress = (
         LessonProgress.objects
         .select_for_update()
+        .select_related(
+            "enrollment",
+            "lecture",
+        )
         .get(
             pk=lesson_progress.pk,
         )
@@ -351,6 +493,10 @@ def resume_lesson(
 
     lesson_progress.save()
 
+    update_course_completion(
+        enrollment=lesson_progress.enrollment,
+    )
+
     return lesson_progress
 
 
@@ -366,7 +512,7 @@ def update_course_progress(
     validated_data,
 ):
     """
-    Update course progress.
+    Manually update course progress.
     """
 
     course_progress = (
@@ -377,7 +523,10 @@ def update_course_progress(
         )
     )
 
-    for field, value in validated_data.items():
+    for (
+        field,
+        value,
+    ) in validated_data.items():
         setattr(
             course_progress,
             field,
@@ -395,46 +544,113 @@ def update_course_completion(
     enrollment,
 ):
     """
-    Recalculate course progress from lesson progress.
+    Recalculate complete course progress.
+
+    Progress is calculated from the actual
+    published course lectures, not from the
+    number of LessonProgress records.
     """
 
     course_progress = (
         CourseProgress.objects
         .select_for_update()
-        .select_related(
-            "enrollment",
-        )
         .get(
             enrollment=enrollment,
         )
     )
 
-    lesson_progress = (
-        LessonProgress.objects.filter(
-            enrollment=enrollment,
-        )
+    course = enrollment.course
+
+    # ------------------------------------------------------
+    # Published sections
+    # ------------------------------------------------------
+
+    sections = course.sections.filter(
+        is_active=True,
+        is_published=True,
     )
 
-    total_lectures = lesson_progress.count()
+    total_sections = sections.count()
+
+    # ------------------------------------------------------
+    # Published lectures
+    # ------------------------------------------------------
+
+    total_lectures = 0
+
+    for section in sections.prefetch_related(
+        "lectures",
+    ):
+        total_lectures += (
+            section.lectures.filter(
+                is_active=True,
+                is_published=True,
+            ).count()
+        )
+
+    # ------------------------------------------------------
+    # Completed lectures
+    # ------------------------------------------------------
 
     completed_lectures = (
-        lesson_progress.filter(
+        LessonProgress.objects.filter(
+            enrollment=enrollment,
+            lecture__section__course=course,
+            lecture__is_active=True,
+            lecture__is_published=True,
             is_completed=True,
-        ).count()
-    )
-
-    total_sections = (
-        enrollment.course.sections.count()
-    )
-
-    completed_sections = (
-        enrollment.course.sections.filter(
-            lectures__lesson_progress__enrollment=enrollment,
-            lectures__lesson_progress__is_completed=True,
         )
+        .values("lecture")
         .distinct()
         .count()
     )
+
+    # ------------------------------------------------------
+    # Completed sections
+    # ------------------------------------------------------
+
+    completed_sections = 0
+
+    for section in sections.prefetch_related(
+        "lectures",
+    ):
+        section_lectures = list(
+            section.lectures.filter(
+                is_active=True,
+                is_published=True,
+            )
+        )
+
+        if not section_lectures:
+            continue
+
+        section_lecture_ids = {
+            lecture.id
+            for lecture in section_lectures
+        }
+
+        completed_lecture_ids = set(
+            LessonProgress.objects.filter(
+                enrollment=enrollment,
+                lecture_id__in=(
+                    section_lecture_ids
+                ),
+                is_completed=True,
+            ).values_list(
+                "lecture_id",
+                flat=True,
+            )
+        )
+
+        if (
+            section_lecture_ids
+            == completed_lecture_ids
+        ):
+            completed_sections += 1
+
+    # ------------------------------------------------------
+    # Calculate percentage
+    # ------------------------------------------------------
 
     progress = 0
 
@@ -447,15 +663,26 @@ def update_course_completion(
             * 100
         )
 
+    # ------------------------------------------------------
+    # Last completed lecture
+    # ------------------------------------------------------
+
     last_completed = (
-        lesson_progress.filter(
-            is_completed=True,
+        LessonProgress.objects.filter(
+            enrollment=enrollment,
+            lecture__section__course=course,
+            lecture__is_completed=True,
         )
+        .select_related("lecture")
         .order_by(
             "-completed_at",
         )
         .first()
     )
+
+    # ------------------------------------------------------
+    # Update CourseProgress
+    # ------------------------------------------------------
 
     course_progress.completed_sections = (
         completed_sections
@@ -483,14 +710,24 @@ def update_course_completion(
         else None
     )
 
-    if progress == 100:
-        course_progress.completed_at = (
-            timezone.now()
-        )
+    if progress >= 100:
+        if (
+            course_progress.completed_at
+            is None
+        ):
+            course_progress.completed_at = (
+                timezone.now()
+            )
+    else:
+        course_progress.completed_at = None
 
     course_progress.save()
 
-    if progress == 100:
+    # ------------------------------------------------------
+    # Complete enrollment
+    # ------------------------------------------------------
+
+    if progress >= 100:
         complete_enrollment(
             enrollment=enrollment,
         )
@@ -524,27 +761,46 @@ def reset_course_progress(
         completed_at=None,
     )
 
+    course = (
+        course_progress.enrollment.course
+    )
+
+    sections = course.sections.filter(
+        is_active=True,
+        is_published=True,
+    )
+
+    total_sections = sections.count()
+
+    total_lectures = 0
+
+    for section in sections.prefetch_related(
+        "lectures",
+    ):
+        total_lectures += (
+            section.lectures.filter(
+                is_active=True,
+                is_published=True,
+            ).count()
+        )
+
     course_progress.completed_sections = 0
 
     course_progress.completed_lectures = 0
 
     course_progress.total_sections = (
-        course_progress.enrollment.course.sections.count()
+        total_sections
     )
 
     course_progress.total_lectures = (
-        course_progress.enrollment.course.sections
-        .prefetch_related("lectures")
-        .values_list(
-            "lectures",
-            flat=True,
-        )
-        .count()
+        total_lectures
     )
 
     course_progress.progress_percentage = 0
 
-    course_progress.last_completed_lecture = None
+    course_progress.last_completed_lecture = (
+        None
+    )
 
     course_progress.completed_at = None
 
@@ -560,9 +816,15 @@ def reset_course_progress(
         ],
     )
 
-    enrollment = course_progress.enrollment
+    enrollment = (
+        course_progress.enrollment
+    )
 
-    enrollment.status = EnrollmentStatus.ACTIVE
+    enrollment.status = (
+        EnrollmentStatus.ACTIVE
+    )
+
+    enrollment.is_active = True
 
     enrollment.completed_at = None
 
@@ -571,10 +833,10 @@ def reset_course_progress(
     enrollment.save(
         update_fields=[
             "status",
+            "is_active",
             "completed_at",
             "certificate_issued",
         ],
     )
 
     return course_progress
-

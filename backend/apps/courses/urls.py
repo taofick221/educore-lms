@@ -19,39 +19,29 @@ urlpatterns = [
     # ======================================================
     # Categories
     # ======================================================
+
     path(
         "categories/",
         CategoryListCreateAPIView.as_view(),
         name="category-list",
     ),
+
     path(
-        "categories/<slug:slug>/",
+        "categories/slug:<slug:slug>/",
         CategoryRetrieveUpdateDestroyAPIView.as_view(),
         name="category-detail",
     ),
 
     # ======================================================
-    # Courses
-    # ======================================================
-    path(
-        "",
-        CourseListCreateAPIView.as_view(),
-        name="course-list",
-    ),
-    path(
-        "<slug:slug>/",
-        CourseRetrieveUpdateDestroyAPIView.as_view(),
-        name="course-detail",
-    ),
-
-    # ======================================================
     # Sections
     # ======================================================
+
     path(
         "sections/",
         SectionListCreateAPIView.as_view(),
         name="section-list",
     ),
+
     path(
         "sections/<slug:slug>/",
         SectionRetrieveUpdateDestroyAPIView.as_view(),
@@ -61,11 +51,13 @@ urlpatterns = [
     # ======================================================
     # Lectures
     # ======================================================
+
     path(
         "lectures/",
         LectureListCreateAPIView.as_view(),
         name="lecture-list",
     ),
+
     path(
         "lectures/<slug:slug>/",
         LectureRetrieveUpdateDestroyAPIView.as_view(),
@@ -75,14 +67,33 @@ urlpatterns = [
     # ======================================================
     # Resources
     # ======================================================
+
     path(
         "resources/",
         ResourceListCreateAPIView.as_view(),
         name="resource-list",
     ),
+
     path(
         "resources/<uuid:pk>/",
         ResourceRetrieveUpdateDestroyAPIView.as_view(),
         name="resource-detail",
+    ),
+
+    # ======================================================
+    # Courses
+    # IMPORTANT: Keep this AFTER sections/lectures/resources
+    # ======================================================
+
+    path(
+        "",
+        CourseListCreateAPIView.as_view(),
+        name="course-list",
+    ),
+
+    path(
+        "<slug:slug>/",
+        CourseRetrieveUpdateDestroyAPIView.as_view(),
+        name="course-detail",
     ),
 ]

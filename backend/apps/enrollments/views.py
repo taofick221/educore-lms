@@ -1,29 +1,47 @@
-from django_filters.rest_framework import (
-    DjangoFilterBackend,
-)
-from drf_spectacular.utils import (
-    extend_schema,
-)
+from django_filters.rest_framework import DjangoFilterBackend
+
+from drf_spectacular.utils import extend_schema
+
 from rest_framework import (
     filters,
     generics,
     permissions,
+    status,
 )
 
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
 from .filters import EnrollmentFilter
+
 from .permissions import (
     IsAdminOrEnrollmentOwner,
+    IsCourseProgressOwner,
+    IsLessonProgressOwner,
     IsStudentOrReadOnly,
 )
+
 from .selectors import (
+    get_course_progress,
     get_enrollment_by_id,
     get_enrollments,
+    get_lesson_progress,
 )
+
 from .serializers import (
+    ActivateEnrollmentSerializer,
+    CancelEnrollmentSerializer,
+    CompleteEnrollmentSerializer,
+    CourseProgressSerializer,
     CreateEnrollmentSerializer,
+    CreateLessonProgressSerializer,
     EnrollmentDetailSerializer,
     EnrollmentListSerializer,
+    IssueCertificateSerializer,
+    LessonProgressSerializer,
+    UpdateCourseProgressSerializer,
     UpdateEnrollmentSerializer,
+    UpdateLessonProgressSerializer,
 )
 
 
@@ -62,9 +80,7 @@ class EnrollmentListCreateAPIView(
         "-enrolled_at",
     )
 
-    def get_queryset(
-        self,
-    ):
+    def get_queryset(self):
         queryset = (
             get_enrollments()
             .select_related(
@@ -79,7 +95,11 @@ class EnrollmentListCreateAPIView(
         if user.is_staff:
             return queryset
 
-        if getattr(user, "role", None) == "instructor":
+        if getattr(
+            user,
+            "role",
+            None,
+        ) == "instructor":
             return queryset.filter(
                 course__instructor=user,
             )
@@ -88,17 +108,13 @@ class EnrollmentListCreateAPIView(
             student=user,
         )
 
-    def get_serializer_class(
-        self,
-    ):
+    def get_serializer_class(self):
         if self.request.method == "POST":
             return CreateEnrollmentSerializer
 
         return EnrollmentListSerializer
 
-    def get_permissions(
-        self,
-    ):
+    def get_permissions(self):
         if self.request.method == "POST":
             return [
                 IsStudentOrReadOnly(),
@@ -133,16 +149,12 @@ class EnrollmentRetrieveUpdateDestroyAPIView(
 
     lookup_field = "pk"
 
-    def get_object(
-        self,
-    ):
+    def get_object(self):
         return get_enrollment_by_id(
             self.kwargs["pk"],
         )
 
-    def get_serializer_class(
-        self,
-    ):
+    def get_serializer_class(self):
         if self.request.method in (
             "PUT",
             "PATCH",
@@ -164,42 +176,56 @@ class EnrollmentRetrieveUpdateDestroyAPIView(
         instance.delete()
 
 
-from drf_spectacular.utils import (
-    extend_schema,
-)
-from rest_framework import (
-    generics,
-    permissions,
-    status,
-)
-from rest_framework.response import Response
-from rest_framework.views import APIView
+# ==========================================================
+# Lesson Progress List / Create
+# ==========================================================
 
-from .permissions import (
-    IsAdminOrEnrollmentOwner,
-    IsCourseProgressOwner,
-    IsLessonProgressOwner,
+
+@extend_schema(
+    tags=["Lesson Progress"],
 )
-from .selectors import (
-    get_course_progress,
-    get_enrollment_by_id,
-    get_lesson_progress,
-)
-from .serializers import (
-    ActivateEnrollmentSerializer,
-    CancelEnrollmentSerializer,
-    CompleteEnrollmentSerializer,
-    CourseProgressSerializer,
-    EnrollmentDetailSerializer,
-    IssueCertificateSerializer,
-    LessonProgressSerializer,
-    UpdateCourseProgressSerializer,
-    UpdateLessonProgressSerializer,
-)
+class LessonProgressListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get_queryset(self):
+        queryset = (
+            get_lesson_progress()
+            .select_related(
+                "enrollment",
+                "lecture",
+                "lecture__section",
+                "lecture__section__course",
+            )
+        )
+
+        user = self.request.user
+
+        if user.is_staff:
+            return queryset
+
+        return queryset.filter(
+            enrollment__student=user,
+        )
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateLessonProgressSerializer
+
+        return LessonProgressSerializer
+
+    def perform_create(
+        self,
+        serializer,
+    ):
+        serializer.save()
 
 
 # ==========================================================
-# Lesson Progress
+# Lesson Progress Retrieve / Update
 # ==========================================================
 
 
@@ -216,9 +242,7 @@ class LessonProgressRetrieveUpdateAPIView(
 
     lookup_field = "pk"
 
-    def get_queryset(
-        self,
-    ):
+    def get_queryset(self):
         return (
             get_lesson_progress()
             .select_related(
@@ -229,9 +253,7 @@ class LessonProgressRetrieveUpdateAPIView(
             )
         )
 
-    def get_serializer_class(
-        self,
-    ):
+    def get_serializer_class(self):
         if self.request.method in (
             "PUT",
             "PATCH",
@@ -265,9 +287,7 @@ class CourseProgressRetrieveUpdateAPIView(
 
     lookup_field = "pk"
 
-    def get_queryset(
-        self,
-    ):
+    def get_queryset(self):
         return (
             get_course_progress()
             .select_related(
@@ -278,9 +298,7 @@ class CourseProgressRetrieveUpdateAPIView(
             )
         )
 
-    def get_serializer_class(
-        self,
-    ):
+    def get_serializer_class(self):
         if self.request.method in (
             "PUT",
             "PATCH",

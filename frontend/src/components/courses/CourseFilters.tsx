@@ -3,11 +3,15 @@ import type { CourseListParams } from "../../types/course";
 interface Props {
   filters: CourseListParams;
   onChange: (filters: CourseListParams) => void;
+  mobile?: boolean;
+  onApply?: () => void;
 }
 
 function CourseFilters({
   filters,
   onChange,
+  mobile = false,
+  onApply,
 }: Props) {
   const updateFilter = (
     key: keyof CourseListParams,
@@ -28,7 +32,13 @@ function CourseFilters({
   );
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-5">
+    <div
+      className={
+        mobile
+          ? "space-y-5"
+          : "rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
+      }
+    >
       {/* ==================================================
           Header
       ================================================== */}
@@ -39,8 +49,9 @@ function CourseFilters({
             Find your course
           </h2>
 
-          <p className="mt-0.5 text-xs leading-5 text-gray-500 sm:text-sm">
-            Search and filter courses based on your needs.
+          <p className="mt-1 text-xs leading-5 text-gray-500">
+            Search and filter courses based on your
+            needs.
           </p>
         </div>
 
@@ -48,7 +59,7 @@ function CourseFilters({
           <button
             type="button"
             onClick={clearFilters}
-            className="shrink-0 rounded-lg px-2 py-1 text-xs font-bold text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-700 sm:text-sm"
+            className="shrink-0 text-xs font-bold text-indigo-600 transition hover:text-indigo-700"
           >
             Clear
           </button>
@@ -56,188 +67,219 @@ function CourseFilters({
       </div>
 
       {/* ==================================================
-          Main Filters
+          Search
       ================================================== */}
 
-      <div className="mt-4 grid gap-3 sm:mt-5 sm:gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {/* Search */}
+      <div>
+        <label
+          htmlFor={
+            mobile
+              ? "mobile-course-search"
+              : "course-search"
+          }
+          className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-500"
+        >
+          Search courses
+        </label>
 
-        <div className="min-w-0 lg:col-span-2">
-          <label
-            htmlFor="course-search"
-            className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-500 sm:text-xs"
-          >
-            Search
-          </label>
+        <div className="relative">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
+            🔎
+          </span>
 
-          <div className="relative">
-            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm text-gray-400">
-              🔎
-            </span>
-
-            <input
-              id="course-search"
-              type="text"
-              value={filters.search ?? ""}
-              onChange={(event) =>
-                updateFilter(
-                  "search",
-                  event.target.value,
-                )
-              }
-              placeholder="Search courses..."
-              className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 pl-10 pr-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-50 sm:h-11"
-            />
-          </div>
-        </div>
-
-        {/* Level */}
-
-        <div className="min-w-0">
-          <label
-            htmlFor="course-level"
-            className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-500 sm:text-xs"
-          >
-            Level
-          </label>
-
-          <select
-            id="course-level"
-            value={filters.level ?? ""}
+          <input
+            id={
+              mobile
+                ? "mobile-course-search"
+                : "course-search"
+            }
+            type="text"
+            value={filters.search ?? ""}
             onChange={(event) =>
               updateFilter(
-                "level",
+                "search",
                 event.target.value,
               )
             }
-            className="h-10 w-full min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-50 sm:h-11 sm:px-4"
-          >
-            <option value="">All levels</option>
-            <option value="beginner">
-              Beginner
-            </option>
-            <option value="intermediate">
-              Intermediate
-            </option>
-            <option value="advanced">
-              Advanced
-            </option>
-          </select>
-        </div>
-
-        {/* Language */}
-
-        <div className="min-w-0">
-          <label
-            htmlFor="course-language"
-            className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-500 sm:text-xs"
-          >
-            Language
-          </label>
-
-          <select
-            id="course-language"
-            value={filters.language ?? ""}
-            onChange={(event) =>
-              updateFilter(
-                "language",
-                event.target.value,
-              )
-            }
-            className="h-10 w-full min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-50 sm:h-11 sm:px-4"
-          >
-            <option value="">
-              All languages
-            </option>
-
-            <option value="english">
-              English
-            </option>
-
-            <option value="bangla">
-              Bangla
-            </option>
-          </select>
+            placeholder="Search by course name..."
+            className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+          />
         </div>
       </div>
 
       {/* ==================================================
-          Secondary Filters
+          Level
       ================================================== */}
 
-      <div className="mt-3 grid gap-3 border-t border-gray-100 pt-3 sm:mt-4 sm:gap-4 sm:pt-4 md:grid-cols-2">
-        {/* Category */}
+      <div>
+        <label
+          htmlFor={
+            mobile
+              ? "mobile-course-level"
+              : "course-level"
+          }
+          className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-500"
+        >
+          Level
+        </label>
 
-        <div className="min-w-0">
-          <label
-            htmlFor="course-category"
-            className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-500 sm:text-xs"
-          >
-            Category
-          </label>
-
-          <input
-            id="course-category"
-            type="text"
-            value={filters.category ?? ""}
-            onChange={(event) =>
-              updateFilter(
-                "category",
-                event.target.value,
-              )
-            }
-            placeholder="Category slug..."
-            className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none transition placeholder:text-gray-400 focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-50 sm:h-11 sm:px-4"
-          />
-        </div>
-
-        {/* Ordering */}
-
-        <div className="min-w-0">
-          <label
-            htmlFor="course-ordering"
-            className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-500 sm:text-xs"
-          >
-            Sort
-          </label>
-
-          <select
-            id="course-ordering"
-            value={filters.ordering ?? ""}
-            onChange={(event) =>
-              updateFilter(
-                "ordering",
-                event.target.value,
-              )
-            }
-            className="h-10 w-full min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-50 sm:h-11 sm:px-4"
-          >
-            <option value="">
-              Newest
-            </option>
-
-            <option value="title">
-              Name A-Z
-            </option>
-
-            <option value="-title">
-              Name Z-A
-            </option>
-
-            <option value="price">
-              Price Low-High
-            </option>
-
-            <option value="-price">
-              Price High-Low
-            </option>
-
-            <option value="-created_at">
-              Recently Added
-            </option>
-          </select>
-        </div>
+        <select
+          id={
+            mobile
+              ? "mobile-course-level"
+              : "course-level"
+          }
+          value={filters.level ?? ""}
+          onChange={(event) =>
+            updateFilter(
+              "level",
+              event.target.value,
+            )
+          }
+          className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+        >
+          <option value="">All levels</option>
+          <option value="beginner">Beginner</option>
+          <option value="intermediate">
+            Intermediate
+          </option>
+          <option value="advanced">Advanced</option>
+        </select>
       </div>
+
+      {/* ==================================================
+          Language
+      ================================================== */}
+
+      <div>
+        <label
+          htmlFor={
+            mobile
+              ? "mobile-course-language"
+              : "course-language"
+          }
+          className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-500"
+        >
+          Language
+        </label>
+
+        <select
+          id={
+            mobile
+              ? "mobile-course-language"
+              : "course-language"
+          }
+          value={filters.language ?? ""}
+          onChange={(event) =>
+            updateFilter(
+              "language",
+              event.target.value,
+            )
+          }
+          className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+        >
+          <option value="">All languages</option>
+          <option value="english">English</option>
+          <option value="bangla">Bangla</option>
+        </select>
+      </div>
+
+      {/* ==================================================
+          Category
+      ================================================== */}
+
+      <div>
+        <label
+          htmlFor={
+            mobile
+              ? "mobile-course-category"
+              : "course-category"
+          }
+          className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-500"
+        >
+          Category
+        </label>
+
+        <input
+          id={
+            mobile
+              ? "mobile-course-category"
+              : "course-category"
+          }
+          type="text"
+          value={filters.category ?? ""}
+          onChange={(event) =>
+            updateFilter(
+              "category",
+              event.target.value,
+            )
+          }
+          placeholder="Category"
+          className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none transition placeholder:text-gray-400 focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+        />
+      </div>
+
+      {/* ==================================================
+          Sort
+      ================================================== */}
+
+      <div>
+        <label
+          htmlFor={
+            mobile
+              ? "mobile-course-ordering"
+              : "course-ordering"
+          }
+          className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-500"
+        >
+          Sort by
+        </label>
+
+        <select
+          id={
+            mobile
+              ? "mobile-course-ordering"
+              : "course-ordering"
+          }
+          value={filters.ordering ?? ""}
+          onChange={(event) =>
+            updateFilter(
+              "ordering",
+              event.target.value,
+            )
+          }
+          className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-700 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+        >
+          <option value="">Newest</option>
+          <option value="title">Name A-Z</option>
+          <option value="-title">Name Z-A</option>
+          <option value="price">
+            Price Low-High
+          </option>
+          <option value="-price">
+            Price High-Low
+          </option>
+          <option value="-created_at">
+            Recently Added
+          </option>
+        </select>
+      </div>
+
+      {/* ==================================================
+          Mobile Apply
+      ================================================== */}
+
+      {mobile && (
+        <div className="sticky bottom-0 -mx-5 border-t border-gray-200 bg-white px-5 py-4">
+          <button
+            type="button"
+            onClick={onApply}
+            className="w-full rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+          >
+            Apply Filters
+          </button>
+        </div>
+      )}
     </div>
   );
 }

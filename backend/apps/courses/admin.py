@@ -1,5 +1,7 @@
 from django.contrib import admin
 
+from unfold.admin import ModelAdmin, TabularInline
+
 from .models import (
     Category,
     Course,
@@ -17,33 +19,28 @@ from .models import (
 # ==========================================================
 
 
-class CourseFeatureInline(admin.TabularInline):
+class CourseFeatureInline(TabularInline):
     model = CourseFeature
     extra = 0
-    fields = (
-        "title",
-    )
+    fields = ("title",)
 
 
-class LearningOutcomeInline(admin.TabularInline):
+class LearningOutcomeInline(TabularInline):
     model = LearningOutcome
     extra = 0
-    fields = (
-        "title",
-    )
+    fields = ("title",)
 
 
-class RequirementInline(admin.TabularInline):
+class RequirementInline(TabularInline):
     model = Requirement
     extra = 0
-    fields = (
-        "title",
-    )
+    fields = ("title",)
 
 
-class SectionInline(admin.TabularInline):
+class SectionInline(TabularInline):
     model = Section
     extra = 0
+
     fields = (
         "title",
         "slug",
@@ -51,6 +48,7 @@ class SectionInline(admin.TabularInline):
         "is_published",
         "is_active",
     )
+
     prepopulated_fields = {
         "slug": ("title",),
     }
@@ -62,7 +60,7 @@ class SectionInline(admin.TabularInline):
 
 
 @admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
+class CategoryAdmin(ModelAdmin):
     list_display = (
         "name",
         "is_active",
@@ -80,14 +78,10 @@ class CategoryAdmin(admin.ModelAdmin):
     )
 
     prepopulated_fields = {
-        "slug": (
-            "name",
-        ),
+        "slug": ("name",),
     }
 
-    ordering = (
-        "name",
-    )
+    ordering = ("name",)
 
     readonly_fields = (
         "created_at",
@@ -101,7 +95,7 @@ class CategoryAdmin(admin.ModelAdmin):
 
 
 @admin.register(Course)
-class CourseAdmin(admin.ModelAdmin):
+class CourseAdmin(ModelAdmin):
     list_display = (
         "title",
         "category",
@@ -143,9 +137,7 @@ class CourseAdmin(admin.ModelAdmin):
     )
 
     prepopulated_fields = {
-        "slug": (
-            "title",
-        ),
+        "slug": ("title",),
     }
 
     readonly_fields = (
@@ -154,9 +146,9 @@ class CourseAdmin(admin.ModelAdmin):
         "published_at",
     )
 
-    ordering = (
-        "-created_at",
-    )
+    ordering = ("-created_at",)
+
+    list_per_page = 25
 
     inlines = [
         CourseFeatureInline,
@@ -232,9 +224,7 @@ class CourseAdmin(admin.ModelAdmin):
         (
             "System Information",
             {
-                "classes": (
-                    "collapse",
-                ),
+                "classes": ("collapse",),
                 "fields": (
                     "created_at",
                     "updated_at",
@@ -250,7 +240,7 @@ class CourseAdmin(admin.ModelAdmin):
 
 
 @admin.register(Section)
-class SectionAdmin(admin.ModelAdmin):
+class SectionAdmin(ModelAdmin):
     list_display = (
         "title",
         "course",
@@ -277,9 +267,7 @@ class SectionAdmin(admin.ModelAdmin):
     )
 
     prepopulated_fields = {
-        "slug": (
-            "title",
-        ),
+        "slug": ("title",),
     }
 
     ordering = (
@@ -292,6 +280,8 @@ class SectionAdmin(admin.ModelAdmin):
         "updated_at",
     )
 
+    list_per_page = 25
+
 
 # ==========================================================
 # Lecture Admin
@@ -299,7 +289,7 @@ class SectionAdmin(admin.ModelAdmin):
 
 
 @admin.register(Lecture)
-class LectureAdmin(admin.ModelAdmin):
+class LectureAdmin(ModelAdmin):
     list_display = (
         "title",
         "section",
@@ -328,9 +318,7 @@ class LectureAdmin(admin.ModelAdmin):
     )
 
     prepopulated_fields = {
-        "slug": (
-            "title",
-        ),
+        "slug": ("title",),
     }
 
     ordering = (
@@ -343,6 +331,8 @@ class LectureAdmin(admin.ModelAdmin):
         "updated_at",
     )
 
+    list_per_page = 25
+
 
 # ==========================================================
 # Resource Admin
@@ -350,7 +340,7 @@ class LectureAdmin(admin.ModelAdmin):
 
 
 @admin.register(Resource)
-class ResourceAdmin(admin.ModelAdmin):
+class ResourceAdmin(ModelAdmin):
     list_display = (
         "title",
         "lecture",
@@ -385,6 +375,8 @@ class ResourceAdmin(admin.ModelAdmin):
         "updated_at",
     )
 
+    list_per_page = 25
+
 
 # ==========================================================
 # Course Feature Admin
@@ -392,7 +384,7 @@ class ResourceAdmin(admin.ModelAdmin):
 
 
 @admin.register(CourseFeature)
-class CourseFeatureAdmin(admin.ModelAdmin):
+class CourseFeatureAdmin(ModelAdmin):
     list_display = (
         "title",
         "course",
@@ -420,7 +412,7 @@ class CourseFeatureAdmin(admin.ModelAdmin):
 
 
 @admin.register(Requirement)
-class RequirementAdmin(admin.ModelAdmin):
+class RequirementAdmin(ModelAdmin):
     list_display = (
         "title",
         "course",
@@ -448,7 +440,7 @@ class RequirementAdmin(admin.ModelAdmin):
 
 
 @admin.register(LearningOutcome)
-class LearningOutcomeAdmin(admin.ModelAdmin):
+class LearningOutcomeAdmin(ModelAdmin):
     list_display = (
         "title",
         "course",

@@ -18,6 +18,7 @@ import OrdersPage from "../pages/orders/OrdersPage";
 import OrderDetailsPage from "../pages/orders/OrderDetailsPage";
 
 import LearningPage from "../pages/learning/LearningPage";
+import NotificationsPage from "../pages/notifications/NotificationsPage";
 
 const router = createBrowserRouter([
   {
@@ -82,6 +83,10 @@ const router = createBrowserRouter([
           {
             path: "learning/:enrollmentId",
             element: <LearningPage />,
+          },
+          {
+            path: "notifications",
+            element: <NotificationsPage />,
           },
         ],
       },

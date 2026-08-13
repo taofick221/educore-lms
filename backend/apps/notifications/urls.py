@@ -6,7 +6,7 @@ from .views import NotificationViewSet
 router = DefaultRouter()
 
 router.register(
-    "notifications",
+    "",
     NotificationViewSet,
     basename="notification",
 )

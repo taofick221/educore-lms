@@ -1,5 +1,7 @@
 from django.contrib import admin, messages
 
+from unfold.admin import ModelAdmin, TabularInline
+
 from .models import Order, OrderItem
 from .services import (
     approve_order,
@@ -9,7 +11,12 @@ from .services import (
 )
 
 
-class OrderItemInline(admin.TabularInline):
+# ==========================================================
+# Order Item Inline
+# ==========================================================
+
+
+class OrderItemInline(TabularInline):
     model = OrderItem
     extra = 0
 
@@ -21,8 +28,13 @@ class OrderItemInline(admin.TabularInline):
     )
 
 
+# ==========================================================
+# Order Admin
+# ==========================================================
+
+
 @admin.register(Order)
-class OrderAdmin(admin.ModelAdmin):
+class OrderAdmin(ModelAdmin):
     list_display = (
         "id",
         "student",
@@ -44,6 +56,8 @@ class OrderAdmin(admin.ModelAdmin):
     search_fields = (
         "id",
         "student__email",
+        "student__first_name",
+        "student__last_name",
         "transaction_reference",
     )
 
@@ -58,6 +72,11 @@ class OrderAdmin(admin.ModelAdmin):
         "updated_at",
     )
 
+    autocomplete_fields = (
+        "student",
+        "verified_by",
+    )
+
     inlines = [
         OrderItemInline,
     ]
@@ -69,8 +88,24 @@ class OrderAdmin(admin.ModelAdmin):
         "cancel_selected_orders",
     ]
 
-    @admin.action(description="Verify payment")
-    def verify_selected_payments(self, request, queryset):
+    ordering = (
+        "-created_at",
+    )
+
+    list_per_page = 25
+
+    # ======================================================
+    # Actions
+    # ======================================================
+
+    @admin.action(
+        description="Verify selected payment(s)",
+    )
+    def verify_selected_payments(
+        self,
+        request,
+        queryset,
+    ):
         success_count = 0
 
         for order in queryset:
@@ -92,17 +127,28 @@ class OrderAdmin(admin.ModelAdmin):
         if success_count:
             self.message_user(
                 request,
-                f"{success_count} payment(s) verified successfully.",
+                (
+                    f"{success_count} payment(s) "
+                    "verified successfully."
+                ),
                 level=messages.SUCCESS,
             )
 
-    @admin.action(description="Approve order and enroll student")
-    def approve_selected_orders(self, request, queryset):
+    @admin.action(
+        description="Approve selected order(s) and enroll students",
+    )
+    def approve_selected_orders(
+        self,
+        request,
+        queryset,
+    ):
         success_count = 0
 
         for order in queryset:
             try:
-                approve_order(order=order)
+                approve_order(
+                    order=order,
+                )
 
                 success_count += 1
 
@@ -123,13 +169,21 @@ class OrderAdmin(admin.ModelAdmin):
                 level=messages.SUCCESS,
             )
 
-    @admin.action(description="Reject order")
-    def reject_selected_orders(self, request, queryset):
+    @admin.action(
+        description="Reject selected order(s)",
+    )
+    def reject_selected_orders(
+        self,
+        request,
+        queryset,
+    ):
         success_count = 0
 
         for order in queryset:
             try:
-                reject_order(order=order)
+                reject_order(
+                    order=order,
+                )
 
                 success_count += 1
 
@@ -143,17 +197,28 @@ class OrderAdmin(admin.ModelAdmin):
         if success_count:
             self.message_user(
                 request,
-                f"{success_count} order(s) rejected successfully.",
+                (
+                    f"{success_count} order(s) "
+                    "rejected successfully."
+                ),
                 level=messages.SUCCESS,
             )
 
-    @admin.action(description="Cancel order")
-    def cancel_selected_orders(self, request, queryset):
+    @admin.action(
+        description="Cancel selected order(s)",
+    )
+    def cancel_selected_orders(
+        self,
+        request,
+        queryset,
+    ):
         success_count = 0
 
         for order in queryset:
             try:
-                cancel_order(order=order)
+                cancel_order(
+                    order=order,
+                )
 
                 success_count += 1
 
@@ -167,6 +232,9 @@ class OrderAdmin(admin.ModelAdmin):
         if success_count:
             self.message_user(
                 request,
-                f"{success_count} order(s) cancelled successfully.",
+                (
+                    f"{success_count} order(s) "
+                    "cancelled successfully."
+                ),
                 level=messages.SUCCESS,
             )

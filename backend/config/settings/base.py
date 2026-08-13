@@ -4,6 +4,10 @@ from pathlib import Path
 from decouple import Csv, config
 
 
+# ==========================================================
+# Base Directory
+# ==========================================================
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
@@ -31,7 +35,14 @@ ALLOWED_HOSTS = config(
 # ==========================================================
 
 INSTALLED_APPS = [
+    # ------------------------------------------------------
+    # Unfold
+    # ------------------------------------------------------
+    "unfold",
+
+    # ------------------------------------------------------
     # Django
+    # ------------------------------------------------------
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -39,20 +50,25 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 
+    # ------------------------------------------------------
     # Third Party
+    # ------------------------------------------------------
     "rest_framework",
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "drf_spectacular",
+    "django_filters",
 
+    # ------------------------------------------------------
     # Project Apps
+    # ------------------------------------------------------
     "apps.common",
     "apps.accounts",
     "apps.courses",
     "apps.enrollments",
     "apps.orders",
-    "django_filters",
+    "apps.notifications",
 ]
 
 
@@ -87,17 +103,32 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 TEMPLATES = [
     {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "BACKEND": (
+            "django.template.backends.django."
+            "DjangoTemplates"
+        ),
         "DIRS": [
             BASE_DIR / "templates",
         ],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
-                "django.template.context_processors.debug",
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
+                (
+                    "django.template.context_processors."
+                    "debug"
+                ),
+                (
+                    "django.template.context_processors."
+                    "request"
+                ),
+                (
+                    "django.contrib.auth.context_processors."
+                    "auth"
+                ),
+                (
+                    "django.contrib.messages.context_processors."
+                    "messages"
+                ),
             ],
         },
     },
@@ -217,7 +248,10 @@ AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        (
+            "rest_framework_simplejwt.authentication."
+            "JWTAuthentication"
+        ),
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -234,7 +268,10 @@ REST_FRAMEWORK = {
         "rest_framework.parsers.FormParser",
     ],
     "DEFAULT_FILTER_BACKENDS": [
-        "django_filters.rest_framework.DjangoFilterBackend",
+        (
+            "django_filters.rest_framework."
+            "DjangoFilterBackend"
+        ),
     ],
 }
 
@@ -279,4 +316,21 @@ SPECTACULAR_SETTINGS = {
     ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+}
+
+
+# ==========================================================
+# Django Unfold
+# ==========================================================
+
+UNFOLD = {
+    "SITE_TITLE": "EduCore Admin",
+    "SITE_HEADER": "EduCore",
+    "SITE_URL": "/",
+    "SITE_SYMBOL": "school",
+
+    "SHOW_HISTORY": True,
+    "SHOW_VIEW_ON_SITE": True,
+
+    "THEME": "light",
 }

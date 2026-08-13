@@ -1,11 +1,13 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
+from unfold.admin import ModelAdmin
+
 from .models import User
 
 
 @admin.register(User)
-class CustomUserAdmin(UserAdmin):
+class CustomUserAdmin(UserAdmin, ModelAdmin):
     ordering = ("-created_at",)
 
     list_display = (
@@ -44,7 +46,7 @@ class CustomUserAdmin(UserAdmin):
                 "fields": (
                     "email",
                     "password",
-                )
+                ),
             },
         ),
         (
@@ -55,7 +57,7 @@ class CustomUserAdmin(UserAdmin):
                     "last_name",
                     "phone_number",
                     "avatar",
-                )
+                ),
             },
         ),
         (
@@ -64,7 +66,7 @@ class CustomUserAdmin(UserAdmin):
                 "fields": (
                     "role",
                     "is_verified",
-                )
+                ),
             },
         ),
         (
@@ -76,7 +78,7 @@ class CustomUserAdmin(UserAdmin):
                     "is_superuser",
                     "groups",
                     "user_permissions",
-                )
+                ),
             },
         ),
         (
@@ -86,7 +88,7 @@ class CustomUserAdmin(UserAdmin):
                     "last_login",
                     "created_at",
                     "updated_at",
-                )
+                ),
             },
         ),
     )

@@ -20,4 +20,8 @@ urlpatterns = [
         "enrollments/",
         include("apps.enrollments.urls"),
     ),
+    path(
+        "notifications/",
+        include("apps.notifications.urls"),
+    ),
 ]

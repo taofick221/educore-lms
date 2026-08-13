@@ -1,0 +1,1159 @@
+
+
+===== FILE: F:\educore\backend\apps\accounts\models.py =====
+import uuid
+
+from django.contrib.auth.models import AbstractUser
+from django.core.validators import RegexValidator
+from django.db import models
+
+from .choices import UserRole
+from .constants import DEFAULT_PROFILE_IMAGE
+from .managers import UserManager
+
+
+class User(AbstractUser):
+    username = None
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    email = models.EmailField(
+        unique=True,
+        db_index=True,
+    )
+
+    first_name = models.CharField(
+        max_length=150,
+    )
+
+    last_name = models.CharField(
+        max_length=150,
+        blank=True,
+    )
+
+    phone_regex = RegexValidator(
+        regex=r"^\+?1?\d{9,15}$",
+        message="Phone number must be entered in the format: '+999999999'. Up to 15 digits allowed.",
+    )
+
+    phone_number = models.CharField(
+        validators=[phone_regex],
+        max_length=20,
+        blank=True,
+        null=True,
+        unique=True,
+    )
+
+    avatar = models.ImageField(
+        upload_to="profiles/",
+        default=DEFAULT_PROFILE_IMAGE,
+        blank=True,
+    )
+
+    role = models.CharField(
+        max_length=20,
+        choices=UserRole.choices,
+        default=UserRole.STUDENT,
+        db_index=True,
+    )
+
+    is_verified = models.BooleanField(
+        default=False,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = []
+
+    objects = UserManager()
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["email"]),
+            models.Index(fields=["role"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}".strip()
+
+    def __str__(self):
+        return self.email
+
+
+===== FILE: F:\educore\backend\apps\courses\models\course.py =====
+import uuid
+
+from django.conf import settings
+from django.db import models
+from django.utils import timezone
+from django.utils.text import slugify
+
+from apps.common.models import TimeStampedModel
+
+from ..choices import (
+    CourseLanguage,
+    CourseLevel,
+    CourseStatus,
+)
+from ..constants import (
+    DEFAULT_COURSE_LANGUAGE,
+    DEFAULT_COURSE_LEVEL,
+    DEFAULT_COURSE_STATUS,
+    MAX_COURSE_SUBTITLE_LENGTH,
+    MAX_COURSE_TITLE_LENGTH,
+    MAX_PRICE_DIGITS,
+    MAX_SLUG_LENGTH,
+    PRICE_DECIMAL_PLACES,
+)
+from ..managers import CourseManager
+from .category import Category
+
+
+class Course(TimeStampedModel):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    instructor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="courses",
+    )
+
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.PROTECT,
+        related_name="courses",
+    )
+
+    title = models.CharField(
+        max_length=MAX_COURSE_TITLE_LENGTH,
+        db_index=True,
+    )
+
+    slug = models.SlugField(
+        max_length=MAX_SLUG_LENGTH,
+        unique=True,
+        blank=True,
+    )
+
+    subtitle = models.CharField(
+        max_length=MAX_COURSE_SUBTITLE_LENGTH,
+        blank=True,
+    )
+
+    short_description = models.CharField(
+        max_length=500,
+        blank=True,
+    )
+
+    description = models.TextField()
+
+    thumbnail = models.ImageField(
+        upload_to="courses/thumbnails/",
+        blank=True,
+        null=True,
+    )
+
+    intro_video = models.URLField(
+        blank=True,
+    )
+
+    level = models.CharField(
+        max_length=20,
+        choices=CourseLevel.choices,
+        default=DEFAULT_COURSE_LEVEL,
+    )
+
+    language = models.CharField(
+        max_length=20,
+        choices=CourseLanguage.choices,
+        default=DEFAULT_COURSE_LANGUAGE,
+    )
+
+    duration = models.PositiveIntegerField(
+        default=0,
+        help_text="Course duration in minutes.",
+    )
+
+    price = models.DecimalField(
+        max_digits=MAX_PRICE_DIGITS,
+        decimal_places=PRICE_DECIMAL_PLACES,
+    )
+
+    discount_price = models.DecimalField(
+        max_digits=MAX_PRICE_DIGITS,
+        decimal_places=PRICE_DECIMAL_PLACES,
+        blank=True,
+        null=True,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=CourseStatus.choices,
+        default=DEFAULT_COURSE_STATUS,
+        db_index=True,
+    )
+
+    is_featured = models.BooleanField(
+        default=False,
+        db_index=True,
+    )
+
+    is_published = models.BooleanField(
+        default=False,
+        db_index=True,
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+    )
+
+    published_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    meta_title = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+
+    meta_description = models.TextField(
+        blank=True,
+    )
+
+    objects = CourseManager()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+        verbose_name = "Course"
+        verbose_name_plural = "Courses"
+
+        indexes = [
+            models.Index(fields=["slug"]),
+            models.Index(fields=["category"]),
+            models.Index(fields=["instructor"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["level"]),
+            models.Index(fields=["language"]),
+            models.Index(fields=["is_featured"]),
+            models.Index(fields=["is_published"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "category",
+                    "title",
+                ],
+                name="unique_course_title_per_category",
+            ),
+            models.CheckConstraint(
+                check=models.Q(price__gte=0),
+                name="course_price_greater_than_zero",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(discount_price__isnull=True)
+                    | models.Q(discount_price__gte=0)
+                ),
+                name="course_discount_price_greater_than_zero",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.title)
+            slug = base_slug
+            counter = 1
+
+            while Course.objects.filter(
+                slug=slug,
+            ).exclude(
+                pk=self.pk,
+            ).exists():
+                counter += 1
+                slug = f"{base_slug}-{counter}"
+
+            self.slug = slug
+
+        if self.is_published and self.published_at is None:
+            self.published_at = timezone.now()
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title
+
+
+===== FILE: F:\educore\backend\apps\courses\models\section.py =====
+import uuid
+
+from django.db import models
+from django.utils.text import slugify
+
+from apps.common.models import TimeStampedModel
+
+from ..constants import (
+    MAX_SECTION_TITLE_LENGTH,
+    MAX_SLUG_LENGTH,
+)
+from ..managers import SectionManager
+from .course import Course
+
+
+class Section(TimeStampedModel):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="sections",
+    )
+
+    title = models.CharField(
+        max_length=MAX_SECTION_TITLE_LENGTH,
+    )
+
+    slug = models.SlugField(
+        max_length=MAX_SLUG_LENGTH,
+        blank=True,
+    )
+
+    description = models.TextField(
+        blank=True,
+    )
+
+    order = models.PositiveIntegerField(
+        default=1,
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+    )
+
+    is_published = models.BooleanField(
+        default=False,
+        db_index=True,
+    )
+
+    objects = SectionManager()
+
+    class Meta:
+        ordering = [
+            "order",
+        ]
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "course",
+                    "order",
+                ]
+            ),
+            models.Index(
+                fields=[
+                    "slug",
+                ]
+            ),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "course",
+                    "title",
+                ],
+                name="unique_section_title_per_course",
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    "course",
+                    "order",
+                ],
+                name="unique_section_order_per_course",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.title)
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title
+
+
+
+===== FILE: F:\educore\backend\apps\courses\models\lecture.py =====
+import uuid
+
+from django.db import models
+from django.utils.text import slugify
+
+from apps.common.models import TimeStampedModel
+
+from ..constants import (
+    DEFAULT_VIDEO_DURATION,
+    MAX_LECTURE_TITLE_LENGTH,
+    MAX_SLUG_LENGTH,
+)
+from ..managers import LectureManager
+from .section import Section
+
+
+class Lecture(TimeStampedModel):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    section = models.ForeignKey(
+        Section,
+        on_delete=models.CASCADE,
+        related_name="lectures",
+    )
+
+    title = models.CharField(
+        max_length=MAX_LECTURE_TITLE_LENGTH,
+    )
+
+    slug = models.SlugField(
+        max_length=MAX_SLUG_LENGTH,
+        blank=True,
+    )
+
+    description = models.TextField(
+        blank=True,
+    )
+
+    video_url = models.URLField(
+        blank=True,
+    )
+
+    duration = models.PositiveIntegerField(
+        default=DEFAULT_VIDEO_DURATION,
+        help_text="Duration in seconds.",
+    )
+
+    order = models.PositiveIntegerField(
+        default=1,
+    )
+
+    is_preview = models.BooleanField(
+        default=False,
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+    )
+
+    is_published = models.BooleanField(
+        default=False,
+        db_index=True,
+    )
+
+    objects = LectureManager()
+
+    class Meta:
+        ordering = [
+            "order",
+        ]
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "section",
+                    "order",
+                ]
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "section",
+                    "title",
+                ],
+                name="unique_lecture_title_per_section",
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    "section",
+                    "order",
+                ],
+                name="unique_lecture_order_per_section",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.title)
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title
+
+
+
+===== FILE: F:\educore\backend\apps\enrollments\models\enrollment.py =====
+import uuid
+
+from django.conf import settings
+from django.db import models
+
+from apps.common.models import TimeStampedModel
+from apps.courses.models import Course
+
+from ..choices import EnrollmentStatus
+from ..constants import (
+    DEFAULT_CERTIFICATE_ISSUED,
+    DEFAULT_ENROLLMENT_ACTIVE,
+)
+from ..managers import EnrollmentManager
+
+
+class Enrollment(TimeStampedModel):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="enrollments",
+    )
+
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="enrollments",
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=EnrollmentStatus.choices,
+        default=EnrollmentStatus.ACTIVE,
+        db_index=True,
+    )
+
+    enrolled_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    started_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    completed_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    expires_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    last_accessed_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    certificate_issued = models.BooleanField(
+        default=DEFAULT_CERTIFICATE_ISSUED,
+        db_index=True,
+    )
+
+    is_active = models.BooleanField(
+        default=DEFAULT_ENROLLMENT_ACTIVE,
+        db_index=True,
+    )
+
+    objects = EnrollmentManager()
+
+    class Meta:
+        ordering = [
+            "-enrolled_at",
+        ]
+
+        verbose_name = "Enrollment"
+        verbose_name_plural = "Enrollments"
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "student",
+                ]
+            ),
+            models.Index(
+                fields=[
+                    "course",
+                ]
+            ),
+            models.Index(
+                fields=[
+                    "student",
+                    "course",
+                ]
+            ),
+            models.Index(
+                fields=[
+                    "status",
+                ]
+            ),
+            models.Index(
+                fields=[
+                    "is_active",
+                ]
+            ),
+            models.Index(
+                fields=[
+                    "enrolled_at",
+                ]
+            ),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "student",
+                    "course",
+                ],
+                name="unique_student_course_enrollment",
+            ),
+        ]
+
+    @property
+    def is_completed(self):
+        return (
+            self.status
+            == EnrollmentStatus.COMPLETED
+        )
+
+    @property
+    def can_access(self):
+        return (
+            self.is_active
+            and self.status
+            == EnrollmentStatus.ACTIVE
+        )
+
+    def __str__(self):
+        return (
+            f"{self.student.email} → "
+            f"{self.course.title}"
+        )
+
+
+===== FILE: F:\educore\backend\apps\enrollments\models\course_progress.py =====
+import uuid
+
+from django.db import models
+from django.db.models import F
+
+from apps.common.models import TimeStampedModel
+from apps.courses.models import Lecture
+
+from ..constants import (
+    DEFAULT_COMPLETED_LECTURES,
+    DEFAULT_COMPLETED_SECTIONS,
+    DEFAULT_COURSE_PROGRESS,
+    DEFAULT_TOTAL_LECTURES,
+    DEFAULT_TOTAL_SECTIONS,
+)
+from ..managers import CourseProgressManager
+from .enrollment import Enrollment
+
+
+class CourseProgress(TimeStampedModel):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    enrollment = models.OneToOneField(
+        Enrollment,
+        on_delete=models.CASCADE,
+        related_name="course_progress",
+    )
+
+    completed_sections = models.PositiveIntegerField(
+        default=DEFAULT_COMPLETED_SECTIONS,
+    )
+
+    completed_lectures = models.PositiveIntegerField(
+        default=DEFAULT_COMPLETED_LECTURES,
+    )
+
+    total_sections = models.PositiveIntegerField(
+        default=DEFAULT_TOTAL_SECTIONS,
+    )
+
+    total_lectures = models.PositiveIntegerField(
+        default=DEFAULT_TOTAL_LECTURES,
+    )
+
+    progress_percentage = models.PositiveSmallIntegerField(
+        default=DEFAULT_COURSE_PROGRESS,
+        db_index=True,
+    )
+
+    last_completed_lecture = models.ForeignKey(
+        Lecture,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="course_progress_records",
+    )
+
+    completed_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    objects = CourseProgressManager()
+
+    class Meta:
+        ordering = [
+            "-updated_at",
+        ]
+
+        verbose_name = "Course Progress"
+        verbose_name_plural = "Course Progress"
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "enrollment",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "progress_percentage",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "completed_at",
+                ],
+            ),
+        ]
+
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(
+                        progress_percentage__gte=0,
+                    )
+                    & models.Q(
+                        progress_percentage__lte=100,
+                    )
+                ),
+                name="valid_course_progress_percentage",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    completed_sections__gte=0,
+                ),
+                name="valid_completed_sections",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    completed_lectures__gte=0,
+                ),
+                name="valid_completed_lectures",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    total_sections__gte=0,
+                ),
+                name="valid_total_sections",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    total_lectures__gte=0,
+                ),
+                name="valid_total_lectures",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    completed_sections__lte=F(
+                        "total_sections",
+                    ),
+                ),
+                name="completed_sections_lte_total_sections",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    completed_lectures__lte=F(
+                        "total_lectures",
+                    ),
+                ),
+                name="completed_lectures_lte_total_lectures",
+            ),
+        ]
+
+    @property
+    def is_completed(self):
+        """
+        Returns True when the course is 100% complete.
+        """
+        return self.progress_percentage >= 100
+
+    @property
+    def completion_rate(self):
+        """
+        Returns the current course completion percentage.
+        """
+        return self.progress_percentage
+
+    def __str__(self):
+        return (
+            f"{self.enrollment.student.email} | "
+            f"{self.enrollment.course.title} | "
+            f"{self.progress_percentage}%"
+        )
+
+
+===== FILE: F:\educore\backend\apps\enrollments\models\lesson_progress.py =====
+import uuid
+
+from django.db import models
+
+from apps.common.models import TimeStampedModel
+from apps.courses.models import Lecture
+
+from ..constants import (
+    DEFAULT_LAST_WATCHED_SECOND,
+    DEFAULT_LESSON_COMPLETED,
+    DEFAULT_WATCH_PERCENTAGE,
+)
+from ..managers import LessonProgressManager
+from .enrollment import Enrollment
+
+
+class LessonProgress(TimeStampedModel):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    enrollment = models.ForeignKey(
+        Enrollment,
+        on_delete=models.CASCADE,
+        related_name="lesson_progress",
+    )
+
+    lecture = models.ForeignKey(
+        Lecture,
+        on_delete=models.CASCADE,
+        related_name="lesson_progress",
+    )
+
+    last_watched_second = models.PositiveIntegerField(
+        default=DEFAULT_LAST_WATCHED_SECOND,
+    )
+
+    watch_percentage = models.PositiveSmallIntegerField(
+        default=DEFAULT_WATCH_PERCENTAGE,
+    )
+
+    is_completed = models.BooleanField(
+        default=DEFAULT_LESSON_COMPLETED,
+        db_index=True,
+    )
+
+    completed_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    objects = LessonProgressManager()
+
+    class Meta:
+        ordering = [
+            "-updated_at",
+        ]
+
+        verbose_name = "Lesson Progress"
+        verbose_name_plural = "Lesson Progress"
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "enrollment",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "lecture",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "is_completed",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "watch_percentage",
+                ],
+            ),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "enrollment",
+                    "lecture",
+                ],
+                name="unique_enrollment_lecture_progress",
+            ),
+
+            models.CheckConstraint(
+                check=(
+                    models.Q(
+                        watch_percentage__gte=0,
+                    )
+                    & models.Q(
+                        watch_percentage__lte=100,
+                    )
+                ),
+                name="valid_watch_percentage",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    last_watched_second__gte=0,
+                ),
+                name="valid_last_watched_second",
+            ),
+        ]
+
+    @property
+    def is_finished(self):
+        """
+        Returns True when the lesson is completed.
+        """
+        return self.is_completed or self.watch_percentage >= 100
+
+    def __str__(self):
+        return (
+            f"{self.enrollment.student} - "
+            f"{self.lecture.title}"
+        )
+
+
+===== FILE: F:\educore\backend\apps\orders\models\order.py =====
+import uuid
+
+from django.conf import settings
+from django.db import models
+from ..managers import OrderManager
+from apps.common.models import TimeStampedModel
+
+from ..choices import OrderStatus, PaymentMethod
+from ..constants import (
+    MAX_ORDER_NOTES_LENGTH,
+    MAX_PRICE_DIGITS,
+    MAX_TRANSACTION_REFERENCE_LENGTH,
+    PRICE_DECIMAL_PLACES,
+)
+
+
+class Order(TimeStampedModel):
+    objects = OrderManager()
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="orders",
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=OrderStatus.choices,
+        default=OrderStatus.PENDING,
+        db_index=True,
+    )
+
+    payment_method = models.CharField(
+        max_length=20,
+        choices=PaymentMethod.choices,
+    )
+
+    transaction_reference = models.CharField(
+        max_length=MAX_TRANSACTION_REFERENCE_LENGTH,
+        blank=True,
+    )
+
+    total_amount = models.DecimalField(
+        max_digits=MAX_PRICE_DIGITS,
+        decimal_places=PRICE_DECIMAL_PLACES,
+    )
+
+    payment_verified = models.BooleanField(
+        default=False,
+        db_index=True,
+    )
+
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="verified_orders",
+        blank=True,
+        null=True,
+    )
+
+    verified_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    notes = models.CharField(
+        max_length=MAX_ORDER_NOTES_LENGTH,
+        blank=True,
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+        indexes = [
+            models.Index(
+                fields=["student", "status"],
+            ),
+            models.Index(
+                fields=["status", "payment_verified"],
+            ),
+            models.Index(
+                fields=["created_at"],
+            ),
+            models.Index(
+                fields=["payment_method"],
+            ),
+        ]
+
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(total_amount__gte=0),
+                name="order_total_amount_gte_zero",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.student.email} - {self.id}"
+
+
+===== FILE: F:\educore\backend\apps\orders\models\order_item.py =====
+import uuid
+
+from django.db import models
+
+from apps.common.models import TimeStampedModel
+from apps.courses.models import Course
+
+from ..constants import (
+    MAX_PRICE_DIGITS,
+    PRICE_DECIMAL_PLACES,
+)
+
+
+class OrderItem(TimeStampedModel):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    order = models.ForeignKey(
+        "orders.Order",
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.PROTECT,
+        related_name="order_items",
+    )
+
+    price = models.DecimalField(
+        max_digits=MAX_PRICE_DIGITS,
+        decimal_places=PRICE_DECIMAL_PLACES,
+    )
+
+    class Meta:
+        ordering = ["created_at"]
+
+        indexes = [
+            models.Index(
+                fields=["order"],
+            ),
+            models.Index(
+                fields=["course"],
+            ),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["order", "course"],
+                name="unique_course_per_order",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(price__gte=0),
+                name="order_item_price_gte_zero",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.order_id} - {self.course.title}"

@@ -1,8 +1,140 @@
+
+
+===== FILE: F:\educore\frontend\src\api\client.ts =====
+import axios from "axios";
+import { getAccessToken } from "../utils/storage";
+
+const apiClient = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+apiClient.interceptors.request.use((config) => {
+  const token = getAccessToken();
+
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+
+  return config;
+});
+
+export default apiClient;
+
+
+===== FILE: F:\educore\frontend\src\context\AuthContext.tsx =====
+import {
+  createContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+
+import {
+  getProfile,
+  login as loginApi,
+  logout as logoutApi,
+} from "../api/accounts";
+
+import type {
+  LoginData,
+  User,
+} from "../types/auth";
+
+import {
+  clearTokens,
+  getRefreshToken,
+  saveTokens,
+} from "../utils/storage";
+
+interface AuthContextType {
+  user: User | null;
+  loading: boolean;
+  isAuthenticated: boolean;
+  login: (data: LoginData) => Promise<void>;
+  logout: () => Promise<void>;
+}
+
+export const AuthContext =
+  createContext<AuthContextType | undefined>(
+    undefined,
+  );
+
+interface Props {
+  children: ReactNode;
+}
+
+export function AuthProvider({ children }: Props) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const loadUser = async () => {
+    try {
+      const profile = await getProfile();
+      setUser(profile);
+    } catch {
+      clearTokens();
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+
+    if (token) {
+      loadUser();
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  const login = async (data: LoginData) => {
+    const tokens = await loginApi(data);
+
+    saveTokens(tokens);
+
+    const profile = await getProfile();
+
+    setUser(profile);
+  };
+
+  const logout = async () => {
+    const refresh = getRefreshToken();
+
+    try {
+      if (refresh) {
+        await logoutApi(refresh);
+      }
+    } finally {
+      clearTokens();
+      setUser(null);
+    }
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        isAuthenticated: !!user,
+        login,
+        logout,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+
+===== FILE: F:\educore\frontend\src\components\layout\Navbar.tsx =====
 import { useState } from "react";
 import { Link, NavLink } from "react-router-dom";
-
 import { useAuth } from "../../hooks/useAuth";
-import NotificationBell from "../notifications/NotificationBell";
 
 function Navbar() {
   const {
@@ -94,10 +226,6 @@ function Navbar() {
                 >
                   Dashboard
                 </NavLink>
-
-                {/* Notification */}
-
-                <NotificationBell />
 
                 {/* User */}
 
@@ -205,8 +333,6 @@ function Navbar() {
         {mobileMenuOpen && (
           <div className="border-t border-gray-100 py-2.5 sm:py-3 md:hidden">
             <div className="space-y-0.5 sm:space-y-1">
-              {/* Courses */}
-
               <NavLink
                 to="/courses"
                 onClick={handleNavigation}
@@ -217,50 +343,32 @@ function Navbar() {
 
               {isAuthenticated ? (
                 <>
-                  {/* Dashboard */}
-
                   <NavLink
                     to="/dashboard"
                     onClick={handleNavigation}
-                    className={mobileNavLinkClass}
+                    className={
+                      mobileNavLinkClass
+                    }
                   >
                     Dashboard
                   </NavLink>
 
-                  {/* My Courses */}
-
                   <NavLink
                     to="/my-courses"
                     onClick={handleNavigation}
-                    className={mobileNavLinkClass}
+                    className={
+                      mobileNavLinkClass
+                    }
                   >
                     My Courses
                   </NavLink>
 
-                  {/* Notifications */}
-
-                  <NavLink
-                    to="/notifications"
-                    onClick={handleNavigation}
-                    className={mobileNavLinkClass}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span>
-                        Notifications
-                      </span>
-
-                      <span className="text-gray-400">
-                        →
-                      </span>
-                    </div>
-                  </NavLink>
-
-                  {/* Profile */}
-
                   <NavLink
                     to="/profile"
                     onClick={handleNavigation}
-                    className={mobileNavLinkClass}
+                    className={
+                      mobileNavLinkClass
+                    }
                   >
                     Profile
                   </NavLink>
@@ -299,17 +407,15 @@ function Navbar() {
                 </>
               ) : (
                 <>
-                  {/* Login */}
-
                   <NavLink
                     to="/login"
                     onClick={handleNavigation}
-                    className={mobileNavLinkClass}
+                    className={
+                      mobileNavLinkClass
+                    }
                   >
                     Login
                   </NavLink>
-
-                  {/* Register */}
 
                   <Link
                     to="/register"
@@ -329,3 +435,67 @@ function Navbar() {
 }
 
 export default Navbar;
+
+
+===== FILE: F:\educore\frontend\src\types\api.ts =====
+
+
+
+===== FILE: F:\educore\frontend\src\types\auth.ts =====
+export interface User {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  phone_number: string | null;
+  avatar: string | null;
+  role: string;
+  is_verified: boolean;
+  is_active: boolean;
+  last_login: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuthTokens {
+  access: string;
+  refresh: string;
+}
+
+export interface LoginData {
+  email: string;
+  password: string;
+}
+
+export interface RegisterData {
+  email: string;
+  first_name: string;
+  last_name?: string;
+  phone_number?: string;
+  password: string;
+  confirm_password: string;
+}
+
+
+===== FILE: F:\educore\frontend\src\utils\storage.ts =====
+import type { AuthTokens } from "../types/auth";
+
+const ACCESS_TOKEN = "access_token";
+const REFRESH_TOKEN = "refresh_token";
+
+export const saveTokens = (tokens: AuthTokens) => {
+  localStorage.setItem(ACCESS_TOKEN, tokens.access);
+  localStorage.setItem(REFRESH_TOKEN, tokens.refresh);
+};
+
+export const getAccessToken = () =>
+  localStorage.getItem(ACCESS_TOKEN);
+
+export const getRefreshToken = () =>
+  localStorage.getItem(REFRESH_TOKEN);
+
+export const clearTokens = () => {
+  localStorage.removeItem(ACCESS_TOKEN);
+  localStorage.removeItem(REFRESH_TOKEN);
+};

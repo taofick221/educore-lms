@@ -6,8 +6,8 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from .selectors import (
     get_notification_by_id,
-    get_user_notifications,
     get_unread_notifications,
+    get_user_notifications,
 )
 from .serializers import NotificationSerializer
 from .services import (
@@ -19,10 +19,6 @@ from .services import (
 class NotificationViewSet(
     ReadOnlyModelViewSet,
 ):
-    """
-    API for authenticated user's notifications.
-    """
-
     serializer_class = NotificationSerializer
     permission_classes = (
         IsAuthenticated,
@@ -55,6 +51,24 @@ class NotificationViewSet(
         )
 
     @action(
+        detail=False,
+        methods=["get"],
+        url_path="unread-count",
+    )
+    def unread_count(self, request):
+        count = (
+            get_unread_notifications(
+                request.user,
+            ).count()
+        )
+
+        return Response(
+            {
+                "count": count,
+            }
+        )
+
+    @action(
         detail=True,
         methods=["post"],
         url_path="mark-read",
@@ -64,8 +78,8 @@ class NotificationViewSet(
         request,
         pk=None,
     ):
-        notification = get_notification_by_id(
-            pk,
+        notification = (
+            get_notification_by_id(pk)
         )
 
         if (
@@ -77,7 +91,7 @@ class NotificationViewSet(
                 {
                     "detail": (
                         "Notification not found."
-                    )
+                    ),
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
@@ -112,7 +126,8 @@ class NotificationViewSet(
         return Response(
             {
                 "detail": (
-                    "All notifications marked as read."
+                    "All notifications "
+                    "marked as read."
                 ),
                 "updated_count": updated_count,
             }

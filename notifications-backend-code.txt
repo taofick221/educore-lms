@@ -1,0 +1,567 @@
+
+
+===== FILE: F:\educore\backend\apps\notifications\admin.py =====
+
+
+
+===== FILE: F:\educore\backend\apps\notifications\apps.py =====
+from django.apps import AppConfig
+
+
+class NotificationsConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "apps.notifications"
+
+
+
+===== FILE: F:\educore\backend\apps\notifications\choices.py =====
+from django.db import models
+
+
+class NotificationType(models.TextChoices):
+    # Orders
+    ORDER_CREATED = "order_created", "Order Created"
+    PAYMENT_VERIFIED = "payment_verified", "Payment Verified"
+    ORDER_APPROVED = "order_approved", "Order Approved"
+    ORDER_REJECTED = "order_rejected", "Order Rejected"
+    ORDER_CANCELLED = "order_cancelled", "Order Cancelled"
+
+    # Learning
+    ENROLLMENT_CREATED = (
+        "enrollment_created",
+        "Enrollment Created",
+    )
+    COURSE_COMPLETED = (
+        "course_completed",
+        "Course Completed",
+    )
+    CERTIFICATE_ISSUED = (
+        "certificate_issued",
+        "Certificate Issued",
+    )
+
+    # Courses
+    COURSE_PUBLISHED = (
+        "course_published",
+        "Course Published",
+    )
+    COURSE_UPDATED = (
+        "course_updated",
+        "Course Updated",
+    )
+
+    # Reviews
+    NEW_REVIEW = "new_review", "New Review"
+
+
+===== FILE: F:\educore\backend\apps\notifications\constants.py =====
+DEFAULT_IS_READ = False
+
+NOTIFICATION_TITLE_MAX_LENGTH = 255
+
+NOTIFICATION_MESSAGE_MAX_LENGTH = 1000
+
+
+===== FILE: F:\educore\backend\apps\notifications\exceptions.py =====
+
+
+
+===== FILE: F:\educore\backend\apps\notifications\filters.py =====
+
+
+
+===== FILE: F:\educore\backend\apps\notifications\managers.py =====
+from django.db import models
+
+
+class NotificationQuerySet(models.QuerySet):
+    def unread(self):
+        return self.filter(
+            is_read=False,
+        )
+
+    def read(self):
+        return self.filter(
+            is_read=True,
+        )
+
+    def for_user(self, user):
+        return self.filter(
+            recipient=user,
+        )
+
+
+class NotificationManager(
+    models.Manager.from_queryset(NotificationQuerySet),
+):
+    pass
+
+
+===== FILE: F:\educore\backend\apps\notifications\permissions.py =====
+
+
+
+===== FILE: F:\educore\backend\apps\notifications\selectors.py =====
+from django.db.models import QuerySet
+
+from .models import Notification
+
+
+def get_notifications() -> QuerySet:
+    """
+    Retrieve all notifications.
+    """
+
+    return Notification.objects.select_related(
+        "recipient",
+        "content_type",
+    )
+
+
+def get_user_notifications(
+    user,
+) -> QuerySet:
+    """
+    Retrieve notifications belonging to a user.
+    """
+
+    return (
+        get_notifications()
+        .for_user(user)
+    )
+
+
+def get_unread_notifications(
+    user,
+) -> QuerySet:
+    """
+    Retrieve unread notifications for a user.
+    """
+
+    return (
+        get_user_notifications(user)
+        .unread()
+    )
+
+
+def get_notification_by_id(
+    notification_id,
+):
+    """
+    Retrieve a notification by ID.
+    """
+
+    return get_notifications().filter(
+        id=notification_id,
+    ).first()
+
+
+===== FILE: F:\educore\backend\apps\notifications\serializers.py =====
+from rest_framework import serializers
+
+from .models import Notification
+
+
+class NotificationSerializer(
+    serializers.ModelSerializer,
+):
+    class Meta:
+        model = Notification
+
+        fields = (
+            "id",
+            "notification_type",
+            "title",
+            "message",
+            "is_read",
+            "read_at",
+            "content_type",
+            "object_id",
+            "created_at",
+        )
+
+        read_only_fields = fields
+
+
+===== FILE: F:\educore\backend\apps\notifications\services.py =====
+from django.contrib.contenttypes.models import ContentType
+from django.db import transaction
+
+from .choices import NotificationType
+from .models import Notification
+
+
+@transaction.atomic
+def create_notification(
+    *,
+    recipient,
+    notification_type: NotificationType,
+    title: str,
+    message: str,
+    related_object=None,
+) -> Notification:
+    """
+    Create a notification for a user.
+    """
+
+    notification_data = {
+        "recipient": recipient,
+        "notification_type": notification_type,
+        "title": title,
+        "message": message,
+    }
+
+    if related_object is not None:
+        notification_data.update(
+            {
+                "content_type": ContentType.objects.get_for_model(
+                    related_object,
+                ),
+                "object_id": str(
+                    related_object.pk,
+                ),
+            }
+        )
+
+    return Notification.objects.create(
+        **notification_data,
+    )
+
+
+@transaction.atomic
+def mark_notification_as_read(
+    *,
+    notification,
+) -> Notification:
+    """
+    Mark a notification as read.
+    """
+
+    notification.mark_as_read()
+
+    return notification
+
+
+@transaction.atomic
+def mark_all_notifications_as_read(
+    *,
+    user,
+) -> int:
+    """
+    Mark all unread notifications of a user as read.
+    """
+
+    from django.utils import timezone
+
+    updated_count = (
+        Notification.objects
+        .filter(
+            recipient=user,
+            is_read=False,
+        )
+        .update(
+            is_read=True,
+            read_at=timezone.now(),
+        )
+    )
+
+    return updated_count
+
+
+===== FILE: F:\educore\backend\apps\notifications\signals.py =====
+
+
+
+===== FILE: F:\educore\backend\apps\notifications\urls.py =====
+from rest_framework.routers import DefaultRouter
+
+from .views import NotificationViewSet
+
+
+router = DefaultRouter()
+
+router.register(
+    "notifications",
+    NotificationViewSet,
+    basename="notification",
+)
+
+urlpatterns = router.urls
+
+
+===== FILE: F:\educore\backend\apps\notifications\validators.py =====
+
+
+
+===== FILE: F:\educore\backend\apps\notifications\views.py =====
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.viewsets import ReadOnlyModelViewSet
+
+from .selectors import (
+    get_notification_by_id,
+    get_user_notifications,
+    get_unread_notifications,
+)
+from .serializers import NotificationSerializer
+from .services import (
+    mark_all_notifications_as_read,
+    mark_notification_as_read,
+)
+
+
+class NotificationViewSet(
+    ReadOnlyModelViewSet,
+):
+    """
+    API for authenticated user's notifications.
+    """
+
+    serializer_class = NotificationSerializer
+    permission_classes = (
+        IsAuthenticated,
+    )
+
+    def get_queryset(self):
+        return get_user_notifications(
+            self.request.user,
+        )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="unread",
+    )
+    def unread(self, request):
+        notifications = (
+            get_unread_notifications(
+                request.user,
+            )
+        )
+
+        serializer = self.get_serializer(
+            notifications,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="mark-read",
+    )
+    def mark_read(
+        self,
+        request,
+        pk=None,
+    ):
+        notification = get_notification_by_id(
+            pk,
+        )
+
+        if (
+            notification is None
+            or notification.recipient_id
+            != request.user.id
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Notification not found."
+                    )
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        mark_notification_as_read(
+            notification=notification,
+        )
+
+        serializer = self.get_serializer(
+            notification,
+        )
+
+        return Response(
+            serializer.data,
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="mark-all-read",
+    )
+    def mark_all_read(
+        self,
+        request,
+    ):
+        updated_count = (
+            mark_all_notifications_as_read(
+                user=request.user,
+            )
+        )
+
+        return Response(
+            {
+                "detail": (
+                    "All notifications marked as read."
+                ),
+                "updated_count": updated_count,
+            }
+        )
+
+
+===== FILE: F:\educore\backend\apps\notifications\__init__.py =====
+
+
+
+===== FILE: F:\educore\backend\apps\notifications\models\notification.py =====
+import uuid
+
+from django.conf import settings
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
+from django.db import models
+
+from apps.common.models import TimeStampedModel
+
+from ..choices import NotificationType
+from ..constants import (
+    DEFAULT_IS_READ,
+    NOTIFICATION_MESSAGE_MAX_LENGTH,
+    NOTIFICATION_TITLE_MAX_LENGTH,
+)
+from ..managers import NotificationManager
+
+
+class Notification(TimeStampedModel):
+    """
+    Stores an in-app notification for a user.
+    """
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+
+    notification_type = models.CharField(
+        max_length=50,
+        choices=NotificationType.choices,
+        db_index=True,
+    )
+
+    title = models.CharField(
+        max_length=NOTIFICATION_TITLE_MAX_LENGTH,
+    )
+
+    message = models.TextField(
+        max_length=NOTIFICATION_MESSAGE_MAX_LENGTH,
+    )
+
+    is_read = models.BooleanField(
+        default=DEFAULT_IS_READ,
+        db_index=True,
+    )
+
+    read_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    # ------------------------------------------------------
+    # Optional related object
+    # ------------------------------------------------------
+
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="notification_objects",
+    )
+
+    object_id = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+    )
+
+    related_object = GenericForeignKey(
+        "content_type",
+        "object_id",
+    )
+
+    objects = NotificationManager()
+
+    class Meta:
+        ordering = (
+            "-created_at",
+        )
+
+        verbose_name = "Notification"
+        verbose_name_plural = "Notifications"
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "recipient",
+                    "is_read",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "recipient",
+                    "-created_at",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "notification_type",
+                ],
+            ),
+        ]
+
+    def mark_as_read(self):
+        """
+        Mark this notification as read.
+        """
+        if self.is_read:
+            return
+
+        from django.utils import timezone
+
+        self.is_read = True
+        self.read_at = timezone.now()
+
+        self.save(
+            update_fields=[
+                "is_read",
+                "read_at",
+                "updated_at",
+            ],
+        )
+
+    def __str__(self):
+        return (
+            f"{self.recipient.email} - "
+            f"{self.title}"
+        )
+
+
+===== FILE: F:\educore\backend\apps\notifications\models\__init__.py =====
+from .notification import Notification
+
+__all__ = [
+    "Notification",
+]

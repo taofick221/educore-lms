@@ -1,6 +1,5 @@
 import {
   ArrowRight,
-  Award,
   BookOpen,
   CheckCircle2,
   GraduationCap,

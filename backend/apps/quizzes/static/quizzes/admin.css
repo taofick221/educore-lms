@@ -1,0 +1,97 @@
+/* =========================================================
+   EduCore Quiz Admin
+   ========================================================= */
+
+.inline-group {
+    margin-top: 20px !important;
+}
+
+
+/* Question card */
+
+.inline-related {
+    border: 1px solid #e5e7eb !important;
+    border-radius: 14px !important;
+    margin: 18px 0 !important;
+    padding: 24px !important;
+    background: #ffffff;
+}
+
+
+/* Question textarea */
+
+.inline-related textarea[name$="-text"] {
+    min-height: 120px !important;
+    resize: vertical;
+    border-radius: 10px !important;
+}
+
+
+/* Option inputs */
+
+.inline-related input[name$="-option_a"],
+.inline-related input[name$="-option_b"],
+.inline-related input[name$="-option_c"],
+.inline-related input[name$="-option_d"] {
+    height: 48px !important;
+    border-radius: 10px !important;
+    font-size: 14px !important;
+}
+
+
+/* Number inputs */
+
+.inline-related input[name$="-order"],
+.inline-related input[name$="-points"] {
+    height: 46px !important;
+    border-radius: 10px !important;
+}
+
+
+/* Correct answer section */
+
+.inline-related .field-correct_option {
+    margin-top: 20px !important;
+    padding: 18px !important;
+    border-radius: 12px !important;
+    background: #f5f3ff !important;
+    border: 1px solid #ddd6fe !important;
+}
+
+
+/* Correct answer title */
+
+.inline-related .field-correct_option label {
+    font-weight: 700 !important;
+}
+
+
+/* Radio buttons */
+
+.inline-related input[type="radio"] {
+    accent-color: #4f46e5;
+    margin-right: 8px;
+}
+
+
+/* Delete question */
+
+.inline-related .delete {
+    margin-top: 20px !important;
+}
+
+.inline-related .delete label {
+    color: #dc2626 !important;
+    font-weight: 600 !important;
+}
+
+
+/* Add question */
+
+.add-row {
+    margin-top: 15px !important;
+}
+
+.add-row a {
+    font-weight: 600 !important;
+}

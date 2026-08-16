@@ -1,6 +1,8 @@
 from datetime import timedelta
 from pathlib import Path
 
+from django.urls import reverse_lazy
+
 from decouple import Csv, config
 
 
@@ -33,7 +35,6 @@ ALLOWED_HOSTS = config(
 # ==========================================================
 # Installed Apps
 # ==========================================================
-
 INSTALLED_APPS = [
     # ------------------------------------------------------
     # Unfold
@@ -50,6 +51,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 
+    
+
     # ------------------------------------------------------
     # Third Party
     # ------------------------------------------------------
@@ -59,6 +62,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "drf_spectacular",
     "django_filters",
+    
 
     # ------------------------------------------------------
     # Project Apps
@@ -69,6 +73,10 @@ INSTALLED_APPS = [
     "apps.enrollments",
     "apps.orders",
     "apps.notifications",
+    "apps.certificates",
+    "apps.quizzes",
+    "apps.assignments",
+    "apps.instructor",
 ]
 
 
@@ -333,4 +341,107 @@ UNFOLD = {
     "SHOW_VIEW_ON_SITE": True,
 
     "THEME": "light",
+    "DASHBOARD_CALLBACK": "config.admin_dashboard.dashboard_callback",
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": False,
+        "navigation": [
+            {
+                "title": "EduCore",
+                "separator": True,
+                "collapsible": False,
+                "items": [
+                    {"title": "Dashboard", "icon": "dashboard",
+                        "link": reverse_lazy("admin:index")},
+                    {"title": "Users", "icon": "people", "link": reverse_lazy(
+                        "admin:accounts_user_changelist")},
+                    {"title": "Courses", "icon": "school", "link": reverse_lazy(
+                        "admin:courses_course_changelist")},
+                    {"title": "Enrollments", "icon": "group", "link": reverse_lazy(
+                        "admin:enrollments_enrollment_changelist")},
+                    {"title": "Orders", "icon": "shopping_cart",
+                        "link": reverse_lazy("admin:orders_order_changelist")},
+                    {"title": "Notifications", "icon": "notifications", "link": reverse_lazy(
+                        "admin:notifications_notification_changelist")},
+                    {"title": "Certificates", "icon": "workspace_premium", "link": reverse_lazy(
+                        "admin:certificates_certificate_changelist")},
+                    {"title": "Quizzes", "icon": "quiz", "link": reverse_lazy(
+                        "admin:quizzes_quiz_changelist")},
+                    {"title": "Assignments", "icon": "assignment", "link": reverse_lazy(
+                        "admin:assignments_assignment_changelist")},
+                ],
+            },
+        ],
+    },
 }
+# ==========================================================
+# Redis / Celery
+# ==========================================================
+
+REDIS_URL = config(
+    "REDIS_URL",
+    default="redis://redis:6379/0",
+)
+
+REDIS_CACHE_URL = config(
+    "REDIS_CACHE_URL",
+    default="redis://redis:6379/1",
+)
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_CACHE_URL,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+    },
+}
+
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default=REDIS_URL)
+CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default=REDIS_URL)
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 300
+CELERY_TASK_SOFT_TIME_LIMIT = 240
+CELERY_BEAT_SCHEDULE = {
+    "expire-enrollments-hourly": {
+        "task": "apps.common.tasks.expire_enrollments",
+        "schedule": 3600.0,
+    },
+}
+
+# ==========================================================
+# Email / Frontend
+# ==========================================================
+
+DEFAULT_FROM_EMAIL = config(
+    "DEFAULT_FROM_EMAIL",
+    default="noreply@educore.local",
+)
+FRONTEND_URL = config(
+    "FRONTEND_URL",
+    default="http://localhost:5173",
+)
+
+# ==========================================================
+# Security Defaults
+# ==========================================================
+
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = "DENY"
+SECURE_REFERRER_POLICY = "same-origin"
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = False
+
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

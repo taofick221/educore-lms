@@ -20,4 +20,24 @@ urlpatterns = [
         "enrollments/",
         include("apps.enrollments.urls"),
     ),
+    path(
+        "notifications/",
+        include("apps.notifications.urls"),
+    ),
+    path(
+        "certificates/",
+        include("apps.certificates.urls"),
+    ),
+    path(
+        "quizzes/",
+        include("apps.quizzes.urls"),
+    ),
+    path(
+        "assignments/",
+        include("apps.assignments.urls"),
+    ),
+    path(
+        "instructor/",
+        include("apps.instructor.urls"),
+    ),
 ]

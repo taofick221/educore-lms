@@ -1,0 +1,2231 @@
+﻿============================================================
+EDUCORE - INSTRUCTOR MY COURSES CONTEXT
+============================================================
+
+Please collect the following 4 files exactly as they currently
+exist.
+
+DO NOT MODIFY ANY SOURCE CODE.
+
+============================================================
+1. COURSE VIEWS
+============================================================
+
+backend\apps\courses\views.py
+
+============================================================
+2. COURSE SERIALIZERS
+============================================================
+
+backend\apps\courses\serializers.py
+
+============================================================
+3. COURSE SELECTORS
+============================================================
+
+backend\apps\courses\selectors.py
+
+============================================================
+4. COURSE MODEL
+============================================================
+
+backend\apps\courses\models\course.py
+
+============================================================
+PURPOSE
+============================================================
+
+We are implementing:
+
+Instructor → My Courses
+
+We need to understand the existing Course architecture before
+writing any new Instructor code.
+
+The final implementation should allow an instructor to:
+
+- View only their own courses
+- See course title
+- See course status
+- See published/draft status
+- See students/enrollments
+- See course information
+- Open/manage a course
+- Avoid duplicating existing Course logic
+
+Do NOT create duplicate Course models or replace existing
+Course APIs.
+
+============================================================
+END
+============================================================
+
+
+============================================================
+FILE: .\backend\apps\courses\views.py
+============================================================
+
+from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.utils import (
+    OpenApiResponse,
+    extend_schema,
+)
+from rest_framework import (
+    filters,
+    generics,
+    permissions,
+)
+
+from .filters import CourseFilter
+from .models import (
+    Category,
+)
+from .permissions import (
+    IsAdminOrCourseOwner,
+    IsInstructorOrReadOnly,
+)
+from .selectors import (
+    get_courses,
+)
+from .serializers import (
+    CategorySerializer,
+    CourseDetailSerializer,
+    CourseListSerializer,
+    CreateCourseSerializer,
+    UpdateCourseSerializer,
+)
+
+
+# ==========================================================
+# Category List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Categories"],
+    summary="List Categories",
+    description="Retrieve all active course categories.",
+    responses={
+        200: CategorySerializer(many=True),
+    },
+)
+class CategoryListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    queryset = Category.objects.active()
+
+    serializer_class = CategorySerializer
+
+    lookup_field = "slug"
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [
+                permissions.IsAdminUser(),
+            ]
+
+        return [
+            permissions.AllowAny(),
+        ]
+
+    @extend_schema(
+        summary="Create Category",
+        description="Create a new course category.",
+        request=CategorySerializer,
+        responses={
+            201: CategorySerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+        },
+    )
+    def create(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().create(
+            request,
+            *args,
+            **kwargs,
+        )
+
+# ==========================================================
+# Category Retrieve / Update / Delete
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Categories"],
+    summary="Category Details",
+    description="Retrieve, update or delete a category.",
+    responses={
+        200: CategorySerializer,
+        404: OpenApiResponse(
+            description="Category not found.",
+        ),
+    },
+)
+class CategoryRetrieveUpdateDestroyAPIView(
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    queryset = Category.objects.active()
+
+    serializer_class = CategorySerializer
+
+    lookup_field = "slug"
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [
+                permissions.AllowAny(),
+            ]
+
+        return [
+            permissions.IsAdminUser(),
+        ]
+
+    @extend_schema(
+        summary="Update Category",
+        description="Update an existing category.",
+        request=CategorySerializer,
+        responses={
+            200: CategorySerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+            404: OpenApiResponse(
+                description="Category not found.",
+            ),
+        },
+    )
+    def patch(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().patch(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    @extend_schema(
+        summary="Replace Category",
+        description="Replace an existing category.",
+        request=CategorySerializer,
+        responses={
+            200: CategorySerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+            404: OpenApiResponse(
+                description="Category not found.",
+            ),
+        },
+    )
+    def put(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().put(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    @extend_schema(
+        summary="Delete Category",
+        description="Delete a category.",
+        responses={
+            204: OpenApiResponse(
+                description="Category deleted successfully.",
+            ),
+            404: OpenApiResponse(
+                description="Category not found.",
+            ),
+        },
+    )
+    def delete(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().delete(
+            request,
+            *args,
+            **kwargs,
+        )
+
+# ==========================================================
+# Course List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Courses"],
+    summary="List Courses",
+    description="Retrieve all published courses or create a new course.",
+    responses={
+        200: CourseListSerializer(many=True),
+    },
+)
+class CourseListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    filter_backends = (
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    )
+
+    filterset_class = CourseFilter
+
+    search_fields = (
+        "title",
+        "subtitle",
+        "description",
+        "category__name",
+        "instructor__first_name",
+        "instructor__last_name",
+    )
+
+    ordering_fields = (
+        "created_at",
+        "published_at",
+        "price",
+        "title",
+    )
+
+    ordering = (
+        "-created_at",
+    )
+
+    def get_queryset(self):
+        queryset = get_courses()
+
+        if not self.request.user.is_authenticated:
+            return queryset.filter(
+                is_active=True,
+                is_published=True,
+            )
+
+        if self.request.user.is_staff:
+            return queryset
+
+        if self.request.user.role == "instructor":
+            return queryset.filter(
+                instructor=self.request.user,
+            )
+
+        return queryset.filter(
+            is_active=True,
+            is_published=True,
+        )
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateCourseSerializer
+
+        return CourseListSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [
+                IsInstructorOrReadOnly(),
+            ]
+
+        return [
+            permissions.AllowAny(),
+        ]
+
+    @extend_schema(
+        summary="Create Course",
+        description="Create a new course.",
+        request=CreateCourseSerializer,
+        responses={
+            201: CourseDetailSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+        },
+    )
+    def create(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().create(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
+# ==========================================================
+# Course Retrieve / Update / Delete
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Courses"],
+    summary="Course Details",
+    description="Retrieve, update or delete a course.",
+    responses={
+        200: CourseDetailSerializer,
+        404: OpenApiResponse(
+            description="Course not found.",
+        ),
+    },
+)
+class CourseRetrieveUpdateDestroyAPIView(
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    queryset = get_courses()
+
+    lookup_field = "slug"
+
+    def get_serializer_class(self):
+        if self.request.method in (
+            "PUT",
+            "PATCH",
+        ):
+            return UpdateCourseSerializer
+
+        return CourseDetailSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [
+                permissions.AllowAny(),
+            ]
+
+        return [
+            permissions.IsAuthenticated(),
+            IsAdminOrCourseOwner(),
+        ]
+
+    @extend_schema(
+        summary="Update Course",
+        description="Partially update a course.",
+        request=UpdateCourseSerializer,
+        responses={
+            200: CourseDetailSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+            403: OpenApiResponse(
+                description="Permission denied.",
+            ),
+            404: OpenApiResponse(
+                description="Course not found.",
+            ),
+        },
+    )
+    def patch(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().patch(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    @extend_schema(
+        summary="Replace Course",
+        description="Replace an existing course.",
+        request=UpdateCourseSerializer,
+        responses={
+            200: CourseDetailSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+            403: OpenApiResponse(
+                description="Permission denied.",
+            ),
+            404: OpenApiResponse(
+                description="Course not found.",
+            ),
+        },
+    )
+    def put(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().put(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    @extend_schema(
+        summary="Delete Course",
+        description="Delete a course.",
+        responses={
+            204: OpenApiResponse(
+                description="Course deleted successfully.",
+            ),
+            403: OpenApiResponse(
+                description="Permission denied.",
+            ),
+            404: OpenApiResponse(
+                description="Course not found.",
+            ),
+        },
+    )
+    def delete(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().delete(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_destroy(self, instance):
+        instance.delete()
+
+
+from .permissions import (
+    IsInstructorOrSectionReadOnly,
+    IsSectionOwner,
+)
+from .selectors import (
+    get_sections,
+)
+from .serializers import (
+    CreateSectionSerializer,
+    SectionSerializer,
+    UpdateSectionSerializer,
+)
+
+
+# ==========================================================
+# Section List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Sections"],
+    summary="List Sections",
+    description="Retrieve all sections or create a new section.",
+)
+class SectionListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    queryset = get_sections()
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateSectionSerializer
+
+        return SectionSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [
+                IsInstructorOrSectionReadOnly(),
+            ]
+
+        return [
+            permissions.AllowAny(),
+        ]
+
+    @extend_schema(
+        summary="Create Section",
+        request=CreateSectionSerializer,
+        responses={
+            201: SectionSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+        },
+    )
+    def create(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().create(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
+# ==========================================================
+# Section Retrieve / Update / Delete
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Sections"],
+    summary="Section Details",
+    description="Retrieve, update or delete a section.",
+)
+class SectionRetrieveUpdateDestroyAPIView(
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    queryset = get_sections()
+
+    lookup_field = "slug"
+
+    def get_serializer_class(self):
+        if self.request.method in (
+            "PUT",
+            "PATCH",
+        ):
+            return UpdateSectionSerializer
+
+        return SectionSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [
+                permissions.AllowAny(),
+            ]
+
+        return [
+            permissions.IsAuthenticated(),
+            IsSectionOwner(),
+        ]
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        instance.delete()
+
+
+from .permissions import (
+    IsInstructorOrLectureReadOnly,
+    IsLectureOwner,
+)
+from .selectors import (
+    get_lectures,
+)
+from .serializers import (
+    CreateLectureSerializer,
+    LectureSerializer,
+    UpdateLectureSerializer,
+)
+
+
+# ==========================================================
+# Lecture List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Lectures"],
+    summary="List Lectures",
+    description="Retrieve all lectures or create a new lecture.",
+)
+class LectureListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    queryset = get_lectures()
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateLectureSerializer
+
+        return LectureSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [
+                IsInstructorOrLectureReadOnly(),
+            ]
+
+        return [
+            permissions.AllowAny(),
+        ]
+
+    @extend_schema(
+        summary="Create Lecture",
+        request=CreateLectureSerializer,
+        responses={
+            201: LectureSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+        },
+    )
+    def create(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().create(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
+# ==========================================================
+# Lecture Retrieve / Update / Delete
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Lectures"],
+    summary="Lecture Details",
+    description="Retrieve, update or delete a lecture.",
+)
+class LectureRetrieveUpdateDestroyAPIView(
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    queryset = get_lectures()
+
+    lookup_field = "slug"
+
+    def get_serializer_class(self):
+        if self.request.method in (
+            "PUT",
+            "PATCH",
+        ):
+            return UpdateLectureSerializer
+
+        return LectureSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [
+                permissions.AllowAny(),
+            ]
+
+        return [
+            permissions.IsAuthenticated(),
+            IsLectureOwner(),
+        ]
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        instance.delete()
+
+
+from .permissions import (
+    IsInstructorOrResourceReadOnly,
+    IsResourceOwner,
+)
+from .selectors import (
+    get_resources,
+)
+from .serializers import (
+    CreateResourceSerializer,
+    ResourceSerializer,
+    UpdateResourceSerializer,
+)
+
+
+# ==========================================================
+# Resource List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Resources"],
+    summary="List Resources",
+    description="Retrieve all resources or create a new resource.",
+)
+class ResourceListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    queryset = get_resources()
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateResourceSerializer
+
+        return ResourceSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [
+                IsInstructorOrResourceReadOnly(),
+            ]
+
+        return [
+            permissions.AllowAny(),
+        ]
+
+    @extend_schema(
+        summary="Create Resource",
+        request=CreateResourceSerializer,
+        responses={
+            201: ResourceSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+        },
+    )
+    def create(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().create(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
+# ==========================================================
+# Resource Retrieve / Update / Delete
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Resources"],
+    summary="Resource Details",
+    description="Retrieve, update or delete a resource.",
+)
+class ResourceRetrieveUpdateDestroyAPIView(
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    queryset = get_resources()
+
+    serializer_class = ResourceSerializer
+
+    lookup_field = "pk"
+
+    def get_serializer_class(self):
+        if self.request.method in (
+            "PUT",
+            "PATCH",
+        ):
+            return UpdateResourceSerializer
+
+        return ResourceSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [
+                permissions.AllowAny(),
+            ]
+
+        return [
+            permissions.IsAuthenticated(),
+            IsResourceOwner(),
+        ]
+
+    @extend_schema(
+        summary="Update Resource",
+        request=UpdateResourceSerializer,
+        responses={
+            200: ResourceSerializer,
+        },
+    )
+    def patch(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().patch(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    @extend_schema(
+        summary="Replace Resource",
+        request=UpdateResourceSerializer,
+        responses={
+            200: ResourceSerializer,
+        },
+    )
+    def put(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().put(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    @extend_schema(
+        summary="Delete Resource",
+        responses={
+            204: OpenApiResponse(
+                description="Resource deleted successfully.",
+            ),
+        },
+    )
+    def delete(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().delete(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_destroy(self, instance):
+        instance.delete()
+
+
+
+
+
+============================================================
+FILE: .\backend\apps\courses\serializers.py
+============================================================
+
+from rest_framework import serializers
+
+from .models import (
+    Category,
+    Course,
+    CourseFeature,
+    LearningOutcome,
+    Lecture,
+    Requirement,
+    Resource,
+    Section,
+)
+from .services import (
+    create_category,
+    create_course,
+    create_lecture,
+    create_resource,
+    create_section,
+    update_category,
+    update_course,
+    update_lecture,
+    update_resource,
+    update_section,
+)
+
+
+# ==========================================================
+# Category Serializer
+# ==========================================================
+
+
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+
+        fields = (
+            "id",
+            "name",
+            "slug",
+            "description",
+            "icon",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = (
+            "id",
+            "slug",
+            "created_at",
+            "updated_at",
+        )
+
+    def create(self, validated_data):
+        return create_category(
+            validated_data=validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        return update_category(
+            category=instance,
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Course Feature Serializer
+# ==========================================================
+
+
+class CourseFeatureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CourseFeature
+
+        fields = (
+            "id",
+            "title",
+        )
+
+        read_only_fields = (
+            "id",
+        )
+
+
+# ==========================================================
+# Learning Outcome Serializer
+# ==========================================================
+
+
+class LearningOutcomeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LearningOutcome
+
+        fields = (
+            "id",
+            "title",
+        )
+
+        read_only_fields = (
+            "id",
+        )
+
+
+# ==========================================================
+# Requirement Serializer
+# ==========================================================
+
+
+class RequirementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Requirement
+
+        fields = (
+            "id",
+            "title",
+        )
+
+        read_only_fields = (
+            "id",
+        )
+
+
+# ==========================================================
+# Resource Serializer
+# ==========================================================
+
+
+class ResourceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Resource
+
+        fields = (
+            "id",
+            "title",
+            "resource_type",
+            "file",
+            "external_url",
+            "order",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = (
+            "id",
+            "created_at",
+            "updated_at",
+        )
+
+    def create(self, validated_data):
+        return create_resource(
+            validated_data=validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        return update_resource(
+            resource=instance,
+            validated_data=validated_data,
+        )
+
+# ==========================================================
+# Lecture Serializer
+# ==========================================================
+
+
+class LectureSerializer(serializers.ModelSerializer):
+    resources = ResourceSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    class Meta:
+        model = Lecture
+
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "description",
+            "video_url",
+            "duration",
+            "order",
+            "is_preview",
+            "is_active",
+            "is_published",
+            "resources",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = (
+            "id",
+            "slug",
+            "created_at",
+            "updated_at",
+        )
+
+    def create(self, validated_data):
+        return create_lecture(
+            validated_data=validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        return update_lecture(
+            lecture=instance,
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Section Serializer
+# ==========================================================
+
+
+class SectionSerializer(serializers.ModelSerializer):
+    lectures = LectureSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    class Meta:
+        model = Section
+
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "description",
+            "order",
+            "is_active",
+            "is_published",
+            "lectures",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = (
+            "id",
+            "slug",
+            "created_at",
+            "updated_at",
+        )
+
+    def create(self, validated_data):
+        return create_section(
+            validated_data=validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        return update_section(
+            section=instance,
+            validated_data=validated_data,
+        )
+
+# ==========================================================
+# Course List Serializer
+# ==========================================================
+
+
+class CourseListSerializer(serializers.ModelSerializer):
+    category = CategorySerializer(
+        read_only=True,
+    )
+
+    instructor_id = serializers.UUIDField(
+        source="instructor.id",
+        read_only=True,
+    )
+
+    instructor_name = serializers.CharField(
+        source="instructor.full_name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Course
+
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "subtitle",
+            "short_description",
+            "thumbnail",
+            "category",
+            "instructor_id",
+            "instructor_name",
+            "level",
+            "language",
+            "duration",
+            "price",
+            "discount_price",
+            "status",
+            "is_featured",
+            "is_published",
+            "published_at",
+            "created_at",
+        )
+
+        read_only_fields = fields
+
+
+# ==========================================================
+# Course Detail Serializer
+# ==========================================================
+
+
+class CourseDetailSerializer(serializers.ModelSerializer):
+    category = CategorySerializer(
+        read_only=True,
+    )
+
+    instructor_id = serializers.UUIDField(
+        source="instructor.id",
+        read_only=True,
+    )
+
+    instructor_name = serializers.CharField(
+        source="instructor.full_name",
+        read_only=True,
+    )
+
+    instructor_email = serializers.EmailField(
+        source="instructor.email",
+        read_only=True,
+    )
+
+    features = CourseFeatureSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    learning_outcomes = LearningOutcomeSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    requirements = RequirementSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    sections = SectionSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    total_sections = serializers.SerializerMethodField()
+
+    total_lectures = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Course
+
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "subtitle",
+            "short_description",
+            "description",
+            "thumbnail",
+            "intro_video",
+            "category",
+            "instructor_id",
+            "instructor_name",
+            "instructor_email",
+            "level",
+            "language",
+            "duration",
+            "price",
+            "discount_price",
+            "features",
+            "learning_outcomes",
+            "requirements",
+            "sections",
+            "total_sections",
+            "total_lectures",
+            "status",
+            "is_featured",
+            "is_published",
+            "published_at",
+            "meta_title",
+            "meta_description",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = fields
+
+    def get_total_sections(self, obj):
+        return obj.sections.count()
+
+    def get_total_lectures(self, obj):
+        return Lecture.objects.filter(
+            section__course=obj,
+        ).count()
+
+# ==========================================================
+# Create Course Serializer
+# ==========================================================
+
+
+class CreateCourseSerializer(serializers.ModelSerializer):
+    features = CourseFeatureSerializer(
+        many=True,
+        required=False,
+    )
+
+    learning_outcomes = LearningOutcomeSerializer(
+        many=True,
+        required=False,
+    )
+
+    requirements = RequirementSerializer(
+        many=True,
+        required=False,
+    )
+
+    class Meta:
+        model = Course
+
+        fields = (
+            "title",
+            "subtitle",
+            "short_description",
+            "description",
+            "thumbnail",
+            "intro_video",
+            "category",
+            "level",
+            "language",
+            "duration",
+            "price",
+            "discount_price",
+            "features",
+            "learning_outcomes",
+            "requirements",
+            "meta_title",
+            "meta_description",
+        )
+
+    def validate(self, attrs):
+        price = attrs.get("price")
+        discount_price = attrs.get("discount_price")
+
+        if (
+            discount_price is not None
+            and discount_price > price
+        ):
+            raise serializers.ValidationError(
+                {
+                    "discount_price": (
+                        "Discount price cannot be greater than price."
+                    )
+                }
+            )
+
+        return attrs
+
+    def create(self, validated_data):
+        features = validated_data.pop(
+            "features",
+            [],
+        )
+
+        learning_outcomes = validated_data.pop(
+            "learning_outcomes",
+            [],
+        )
+
+        requirements = validated_data.pop(
+            "requirements",
+            [],
+        )
+
+        validated_data["instructor"] = (
+            self.context["request"].user
+        )
+
+        course = create_course(
+            validated_data=validated_data,
+        )
+
+        if features:
+            CourseFeature.objects.bulk_create(
+                [
+                    CourseFeature(
+                        course=course,
+                        **feature,
+                    )
+                    for feature in features
+                ]
+            )
+
+        if learning_outcomes:
+            LearningOutcome.objects.bulk_create(
+                [
+                    LearningOutcome(
+                        course=course,
+                        **item,
+                    )
+                    for item in learning_outcomes
+                ]
+            )
+
+        if requirements:
+            Requirement.objects.bulk_create(
+                [
+                    Requirement(
+                        course=course,
+                        **item,
+                    )
+                    for item in requirements
+                ]
+            )
+
+        return course
+
+# ==========================================================
+# Update Course Serializer
+# ==========================================================
+
+
+class UpdateCourseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Course
+
+        fields = (
+            "title",
+            "subtitle",
+            "short_description",
+            "description",
+            "thumbnail",
+            "intro_video",
+            "category",
+            "level",
+            "language",
+            "duration",
+            "price",
+            "discount_price",
+            "status",
+            "is_featured",
+            "is_published",
+            "is_active",
+            "meta_title",
+            "meta_description",
+        )
+
+    def validate(self, attrs):
+        price = attrs.get(
+            "price",
+            self.instance.price,
+        )
+
+        discount_price = attrs.get(
+            "discount_price",
+            self.instance.discount_price,
+        )
+
+        if (
+            discount_price is not None
+            and discount_price > price
+        ):
+            raise serializers.ValidationError(
+                {
+                    "discount_price": (
+                        "Discount price cannot be greater than price."
+                    )
+                }
+            )
+
+        return attrs
+
+    def update(self, instance, validated_data):
+        return update_course(
+            course=instance,
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Create Section Serializer
+# ==========================================================
+
+
+class CreateSectionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Section
+
+        fields = (
+            "course",
+            "title",
+            "description",
+            "order",
+            "is_active",
+            "is_published",
+        )
+
+    def create(self, validated_data):
+        return create_section(
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Update Section Serializer
+# ==========================================================
+
+
+class UpdateSectionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Section
+
+        fields = (
+            "title",
+            "description",
+            "order",
+            "is_active",
+            "is_published",
+        )
+
+    def update(self, instance, validated_data):
+        return update_section(
+            section=instance,
+            validated_data=validated_data,
+        )
+
+# ==========================================================
+# Create Lecture Serializer
+# ==========================================================
+
+
+class CreateLectureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Lecture
+
+        fields = (
+            "section",
+            "title",
+            "description",
+            "video_url",
+            "duration",
+            "order",
+            "is_preview",
+            "is_active",
+            "is_published",
+        )
+
+    def create(self, validated_data):
+        return create_lecture(
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Update Lecture Serializer
+# ==========================================================
+
+
+class UpdateLectureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Lecture
+
+        fields = (
+            "title",
+            "description",
+            "video_url",
+            "duration",
+            "order",
+            "is_preview",
+            "is_active",
+            "is_published",
+        )
+
+    def update(self, instance, validated_data):
+        return update_lecture(
+            lecture=instance,
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Create Resource Serializer
+# ==========================================================
+
+
+class CreateResourceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Resource
+
+        fields = (
+            "lecture",
+            "title",
+            "resource_type",
+            "file",
+            "external_url",
+            "order",
+            "is_active",
+        )
+
+    def create(self, validated_data):
+        return create_resource(
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Update Resource Serializer
+# ==========================================================
+
+
+class UpdateResourceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Resource
+
+        fields = (
+            "title",
+            "resource_type",
+            "file",
+            "external_url",
+            "order",
+            "is_active",
+        )
+
+    def update(self, instance, validated_data):
+        return update_resource(
+            resource=instance,
+            validated_data=validated_data,
+        )
+
+
+
+============================================================
+FILE: .\backend\apps\courses\selectors.py
+============================================================
+
+from django.shortcuts import get_object_or_404
+
+from .choices import CourseStatus
+from .models import (
+    Category,
+    Course,
+    Lecture,
+    Resource,
+    Section,
+)
+
+
+# ==========================================================
+# Category Selectors
+# ==========================================================
+
+
+def get_categories():
+    """
+    Retrieve all active categories.
+    """
+
+    return Category.objects.active()
+
+
+def get_category_by_id(category_id):
+    """
+    Retrieve category by ID.
+    """
+
+    return get_object_or_404(
+        get_categories(),
+        id=category_id,
+    )
+
+
+def get_category_by_slug(slug):
+    """
+    Retrieve category by slug.
+    """
+
+    return get_object_or_404(
+        get_categories(),
+        slug=slug,
+    )
+
+
+# ==========================================================
+# Course Selectors
+# ==========================================================
+
+
+def get_courses():
+    """
+    Retrieve all active courses.
+    """
+
+    return (
+        Course.objects.active()
+        .select_related(
+            "category",
+            "instructor",
+        )
+        .prefetch_related(
+            "features",
+            "learning_outcomes",
+            "requirements",
+            "sections",
+        )
+    )
+
+
+def get_course_by_id(course_id):
+    """
+    Retrieve course by ID.
+    """
+
+    return get_object_or_404(
+        get_courses(),
+        id=course_id,
+    )
+
+
+def get_course_by_slug(slug):
+    """
+    Retrieve course by slug.
+    """
+
+    return get_object_or_404(
+        get_courses(),
+        slug=slug,
+    )
+
+
+def get_published_courses():
+    """
+    Retrieve published courses.
+    """
+
+    return (
+        get_courses()
+        .filter(
+            status=CourseStatus.PUBLISHED,
+            is_published=True,
+        )
+    )
+
+
+def get_featured_courses():
+    """
+    Retrieve featured courses.
+    """
+
+    return (
+        get_published_courses()
+        .filter(
+            is_featured=True,
+        )
+    )
+
+
+# ==========================================================
+# Course Utility Selectors
+# ==========================================================
+
+
+def get_instructor_courses(instructor):
+    """
+    Retrieve all courses created by an instructor.
+    """
+
+    return (
+        get_courses()
+        .filter(
+            instructor=instructor,
+        )
+    )
+
+
+def get_category_courses(category):
+    """
+    Retrieve all published courses in a category.
+    """
+
+    return (
+        get_published_courses()
+        .filter(
+            category=category,
+        )
+    )
+
+
+# ==========================================================
+# Section Selectors
+# ==========================================================
+
+
+def get_sections():
+    """
+    Retrieve all active sections.
+    """
+
+    return (
+        Section.objects.active()
+        .select_related(
+            "course",
+        )
+        .prefetch_related(
+            "lectures",
+        )
+    )
+
+
+def get_section_by_id(section_id):
+    """
+    Retrieve section by ID.
+    """
+
+    return get_object_or_404(
+        get_sections(),
+        id=section_id,
+    )
+
+
+def get_section_by_slug(slug):
+    """
+    Retrieve section by slug.
+    """
+
+    return get_object_or_404(
+        get_sections(),
+        slug=slug,
+    )
+
+
+def get_course_sections(course):
+    """
+    Retrieve all sections of a course.
+    """
+
+    return (
+        get_sections()
+        .filter(
+            course=course,
+        )
+        .order_by(
+            "order",
+        )
+    )
+
+
+def get_published_sections(course):
+    """
+    Retrieve published sections of a course.
+    """
+
+    return (
+        get_course_sections(
+            course,
+        )
+        .filter(
+            is_published=True,
+        )
+    )
+
+# ==========================================================
+# Lecture Selectors
+# ==========================================================
+
+
+def get_lectures():
+    """
+    Retrieve all active lectures.
+    """
+
+    return (
+        Lecture.objects.active()
+        .select_related(
+            "section",
+            "section__course",
+        )
+        .prefetch_related(
+            "resources",
+        )
+    )
+
+
+def get_lecture_by_id(lecture_id):
+    """
+    Retrieve lecture by ID.
+    """
+
+    return get_object_or_404(
+        get_lectures(),
+        id=lecture_id,
+    )
+
+
+def get_lecture_by_slug(slug):
+    """
+    Retrieve lecture by slug.
+    """
+
+    return get_object_or_404(
+        get_lectures(),
+        slug=slug,
+    )
+
+
+def get_section_lectures(section):
+    """
+    Retrieve lectures of a section.
+    """
+
+    return (
+        get_lectures()
+        .filter(
+            section=section,
+        )
+        .order_by(
+            "order",
+        )
+    )
+
+
+def get_preview_lectures():
+    """
+    Retrieve preview lectures.
+    """
+
+    return (
+        get_lectures()
+        .filter(
+            is_preview=True,
+            is_published=True,
+        )
+    )
+
+
+# ==========================================================
+# Resource Selectors
+# ==========================================================
+
+
+def get_resources():
+    """
+    Retrieve all active resources.
+    """
+
+    return (
+        Resource.objects.filter(
+            is_active=True,
+        )
+        .select_related(
+            "lecture",
+            "lecture__section",
+            "lecture__section__course",
+        )
+    )
+
+
+def get_resource_by_id(resource_id):
+    """
+    Retrieve resource by ID.
+    """
+
+    return get_object_or_404(
+        get_resources(),
+        id=resource_id,
+    )
+
+
+def get_lecture_resources(lecture):
+    """
+    Retrieve resources of a lecture.
+    """
+
+    return (
+        get_resources()
+        .filter(
+            lecture=lecture,
+        )
+        .order_by(
+            "order",
+        )
+    )
+
+
+def get_resource_by_type(resource_type):
+    """
+    Retrieve resources by type.
+    """
+
+    return (
+        get_resources()
+        .filter(
+            resource_type=resource_type,
+        )
+    )
+
+
+============================================================
+FILE: .\backend\apps\courses\models\course.py
+============================================================
+
+import uuid
+
+from django.conf import settings
+from django.db import models
+from django.utils import timezone
+from django.utils.text import slugify
+
+from apps.common.models import TimeStampedModel
+
+from ..choices import (
+    CourseLanguage,
+    CourseLevel,
+    CourseStatus,
+)
+from ..constants import (
+    DEFAULT_COURSE_LANGUAGE,
+    DEFAULT_COURSE_LEVEL,
+    DEFAULT_COURSE_STATUS,
+    MAX_COURSE_SUBTITLE_LENGTH,
+    MAX_COURSE_TITLE_LENGTH,
+    MAX_PRICE_DIGITS,
+    MAX_SLUG_LENGTH,
+    PRICE_DECIMAL_PLACES,
+)
+from ..managers import CourseManager
+from .category import Category
+
+
+class Course(TimeStampedModel):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    instructor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="courses",
+    )
+
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.PROTECT,
+        related_name="courses",
+    )
+
+    title = models.CharField(
+        max_length=MAX_COURSE_TITLE_LENGTH,
+        db_index=True,
+    )
+
+    slug = models.SlugField(
+        max_length=MAX_SLUG_LENGTH,
+        unique=True,
+        blank=True,
+    )
+
+    subtitle = models.CharField(
+        max_length=MAX_COURSE_SUBTITLE_LENGTH,
+        blank=True,
+    )
+
+    short_description = models.CharField(
+        max_length=500,
+        blank=True,
+    )
+
+    description = models.TextField()
+
+    thumbnail = models.ImageField(
+        upload_to="courses/thumbnails/",
+        blank=True,
+        null=True,
+    )
+
+    intro_video = models.URLField(
+        blank=True,
+    )
+
+    level = models.CharField(
+        max_length=20,
+        choices=CourseLevel.choices,
+        default=DEFAULT_COURSE_LEVEL,
+    )
+
+    language = models.CharField(
+        max_length=20,
+        choices=CourseLanguage.choices,
+        default=DEFAULT_COURSE_LANGUAGE,
+    )
+
+    duration = models.PositiveIntegerField(
+        default=0,
+        help_text="Course duration in minutes.",
+    )
+
+    price = models.DecimalField(
+        max_digits=MAX_PRICE_DIGITS,
+        decimal_places=PRICE_DECIMAL_PLACES,
+    )
+
+    discount_price = models.DecimalField(
+        max_digits=MAX_PRICE_DIGITS,
+        decimal_places=PRICE_DECIMAL_PLACES,
+        blank=True,
+        null=True,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=CourseStatus.choices,
+        default=DEFAULT_COURSE_STATUS,
+        db_index=True,
+    )
+
+    is_featured = models.BooleanField(
+        default=False,
+        db_index=True,
+    )
+
+    is_published = models.BooleanField(
+        default=False,
+        db_index=True,
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+    )
+
+    published_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    meta_title = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+
+    meta_description = models.TextField(
+        blank=True,
+    )
+
+    objects = CourseManager()
+
+    class Meta:
+        ordering = ["-created_at"]
+
+        verbose_name = "Course"
+        verbose_name_plural = "Courses"
+
+        indexes = [
+            models.Index(fields=["slug"]),
+            models.Index(fields=["category"]),
+            models.Index(fields=["instructor"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["level"]),
+            models.Index(fields=["language"]),
+            models.Index(fields=["is_featured"]),
+            models.Index(fields=["is_published"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "category",
+                    "title",
+                ],
+                name="unique_course_title_per_category",
+            ),
+            models.CheckConstraint(
+                check=models.Q(price__gte=0),
+                name="course_price_greater_than_zero",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(discount_price__isnull=True)
+                    | models.Q(discount_price__gte=0)
+                ),
+                name="course_discount_price_greater_than_zero",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.title)
+            slug = base_slug
+            counter = 1
+
+            while Course.objects.filter(
+                slug=slug,
+            ).exclude(
+                pk=self.pk,
+            ).exists():
+                counter += 1
+                slug = f"{base_slug}-{counter}"
+
+            self.slug = slug
+
+        if self.is_published and self.published_at is None:
+            self.published_at = timezone.now()
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title

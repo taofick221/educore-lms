@@ -11,8 +11,7 @@ import HomePage from "../pages/home/HomePage";
 
 import LoginPage from "../pages/auth/LoginPage";
 import RegisterPage from "../pages/auth/RegisterPage";
-import ForgotPasswordPage from "../pages/auth/ForgotPasswordPage";
-import ResetPasswordPage from "../pages/auth/ResetPasswordPage";
+
 
 // ==========================================================
 // Dashboard
@@ -51,7 +50,8 @@ import QuizResultPage from "../pages/learning/QuizResultPage";
 
 import NotificationsPage from "../pages/notifications/NotificationsPage";
 import InstructorDashboardPage from "../pages/instructor/InstructorDashboardPage";
-import CertificatesPage from "../pages/certificates/CertificatesPage";
+import InstructorCoursesPage from "../pages/instructor/InstructorCoursesPage";
+import InstructorCourseEditorPage from "../pages/instructor/InstructorCourseEditorPage";
 import AssignmentPage from "../pages/learning/AssignmentPage";
 // ==========================================================
 // Router
@@ -87,15 +87,6 @@ const router = createBrowserRouter([
         element: <RegisterPage />,
       },
 
-      {
-        path: "forgot-password",
-        element: <ForgotPasswordPage />,
-      },
-
-      {
-        path: "reset-password/:userId",
-        element: <ResetPasswordPage />,
-      },
 
       // ========================================================
       // PROTECTED ROUTES
@@ -200,21 +191,25 @@ const router = createBrowserRouter([
           },
 
           // ======================================================
-          // CERTIFICATES
-          // ======================================================
-
-          {
-            path: "certificates",
-            element: <CertificatesPage />,
-          },
-
-          // ======================================================
           // INSTRUCTOR
           // ======================================================
 
           {
             path: "instructor",
             element: <InstructorDashboardPage />,
+          },
+          {
+            path: "instructor/courses",
+            element: <InstructorCoursesPage />,
+          },
+          {
+            path: "instructor/courses/new",
+            element: <InstructorCourseEditorPage />,
+          },
+
+          {
+            path: "instructor/courses/:slug",
+            element: <InstructorCourseEditorPage />,
           },
         ],
       },

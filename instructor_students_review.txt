@@ -1,0 +1,5830 @@
+============================================================
+EDUCORE - INSTRUCTOR STUDENTS REVIEW
+============================================================
+
+===== BACKEND INSTRUCTOR =====
+
+backend/apps/instructor/urls.py
+backend/apps/instructor/views.py
+backend/apps/instructor/serializers.py
+backend/apps/instructor/selectors.py
+backend/apps/instructor/permissions.py
+
+===== ENROLLMENTS =====
+
+backend/apps/enrollments/models/
+backend/apps/enrollments/serializers.py
+backend/apps/enrollments/selectors.py
+backend/apps/enrollments/views.py
+backend/apps/enrollments/urls.py
+
+===== COURSES =====
+
+backend/apps/courses/models/
+backend/apps/courses/serializers.py
+backend/apps/courses/selectors.py
+backend/apps/courses/views.py
+backend/apps/courses/urls.py
+
+===== FRONTEND INSTRUCTOR =====
+
+frontend/src/api/instructor.ts
+frontend/src/pages/instructor/InstructorDashboardPage.tsx
+frontend/src/pages/instructor/InstructorCoursesPage.tsx
+
+===== FRONTEND ENROLLMENTS =====
+
+frontend/src/api/enrollments.ts
+frontend/src/pages/dashboard/MyCoursesPage.tsx
+
+===== ROUTER =====
+
+frontend/src/routes/index.tsx
+
+============================================================
+DO NOT MODIFY ANY SOURCE CODE.
+ONLY COLLECT CURRENT CODE FOR REVIEW.
+============================================================
+
+
+============================================================
+FILE: .\backend\apps\instructor\urls.py
+============================================================
+from django.urls import path
+
+from .views import (
+    InstructorCourseListAPIView,
+    InstructorDashboardAPIView,
+)
+
+
+app_name = "instructor"
+
+
+urlpatterns = [
+    path(
+        "dashboard/",
+        InstructorDashboardAPIView.as_view(),
+        name="dashboard",
+    ),
+    path(
+        "courses/",
+        InstructorCourseListAPIView.as_view(),
+        name="course-list",
+    ),
+]
+
+
+============================================================
+FILE: .\backend\apps\instructor\views.py
+============================================================
+from drf_spectacular.utils import extend_schema
+from rest_framework import generics, permissions
+from rest_framework.response import Response
+
+from apps.courses.selectors import get_instructor_courses
+
+from .permissions import IsInstructor
+from .serializers import (
+    InstructorCourseSerializer,
+    InstructorDashboardSerializer,
+)
+
+class InstructorDashboardAPIView(generics.GenericAPIView):
+    permission_classes = (
+        permissions.IsAuthenticated,
+        IsInstructor,
+    )
+
+    serializer_class = InstructorDashboardSerializer
+
+    def get(self, request, *args, **kwargs):
+        from decimal import Decimal
+
+        from django.db.models import Sum
+
+        from apps.courses.models import Course
+        from apps.enrollments.models import Enrollment
+
+        instructor = request.user
+
+        courses = Course.objects.filter(
+            instructor=instructor,
+        )
+
+        enrollments = Enrollment.objects.filter(
+            course__instructor=instructor,
+        )
+
+        course_count = courses.count()
+
+        published_course_count = courses.filter(
+            is_published=True,
+            is_active=True,
+        ).count()
+
+        enrollment_count = enrollments.count()
+
+        completed_enrollment_count = enrollments.filter(
+            status="completed",
+        ).count()
+
+        student_count = (
+            enrollments
+            .values("student_id")
+            .distinct()
+            .count()
+        )
+
+        revenue = Decimal("0.00")
+
+        if hasattr(Enrollment, "price_paid"):
+            revenue = (
+                enrollments.aggregate(
+                    total=Sum("price_paid"),
+                )["total"]
+                or Decimal("0.00")
+            )
+
+        data = {
+            "course_count": course_count,
+            "published_course_count": published_course_count,
+            "student_count": student_count,
+            "enrollment_count": enrollment_count,
+            "completed_enrollment_count": (
+                completed_enrollment_count
+            ),
+            "revenue": revenue,
+        }
+
+        serializer = self.get_serializer(data)
+
+        return Response(serializer.data)
+
+
+@extend_schema(
+    tags=["Instructor"],
+    summary="Instructor Courses",
+    description=(
+        "Retrieve courses owned by the authenticated instructor."
+    ),
+    responses={
+        200: InstructorCourseSerializer(many=True),
+    },
+)
+class InstructorCourseListAPIView(
+    generics.ListAPIView,
+):
+    permission_classes = (
+        permissions.IsAuthenticated,
+        IsInstructor,
+    )
+
+    serializer_class = InstructorCourseSerializer
+
+    def get_queryset(self):
+        return get_instructor_courses(
+            instructor=self.request.user,
+        )
+
+
+============================================================
+FILE: .\backend\apps\instructor\serializers.py
+============================================================
+from rest_framework import serializers
+
+from apps.courses.serializers import CourseListSerializer
+
+
+class InstructorDashboardSerializer(
+    serializers.Serializer,
+):
+    course_count = serializers.IntegerField()
+    published_course_count = serializers.IntegerField()
+    student_count = serializers.IntegerField()
+    enrollment_count = serializers.IntegerField()
+    completed_enrollment_count = serializers.IntegerField()
+    revenue = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+    )
+
+
+class InstructorCourseSerializer(
+    CourseListSerializer,
+):
+    """
+    Course representation for the instructor dashboard.
+
+    Reuses the existing CourseListSerializer so we do
+    not duplicate Course fields or presentation logic.
+    """
+
+    class Meta(CourseListSerializer.Meta):
+        fields = CourseListSerializer.Meta.fields
+
+
+============================================================
+FILE: .\backend\apps\instructor\permissions.py
+============================================================
+from rest_framework.permissions import BasePermission
+
+
+class IsInstructor(BasePermission):
+    message = "Only instructors can access this resource."
+
+    def has_permission(self, request, view):
+        return (
+            request.user.is_authenticated
+            and request.user.role == "instructor"
+        )
+
+
+============================================================
+FILE: .\backend\apps\enrollments\serializers.py
+============================================================
+from rest_framework import serializers
+
+from apps.courses.choices import CourseStatus
+
+from .choices import EnrollmentStatus
+from .models import (
+    CourseProgress,
+    Enrollment,
+    LessonProgress,
+)
+from .services import (
+    activate_enrollment,
+    cancel_enrollment,
+    complete_enrollment,
+    create_enrollment,
+    create_lesson_progress,
+    issue_certificate,
+    update_course_completion,
+    update_course_progress,
+    update_lesson_progress,
+)
+
+
+# ==========================================================
+# Enrollment Serializers
+# ==========================================================
+
+
+class EnrollmentListSerializer(
+    serializers.ModelSerializer,
+):
+    student_name = serializers.CharField(
+        source="student.get_full_name",
+        read_only=True,
+    )
+
+    student_email = serializers.EmailField(
+        source="student.email",
+        read_only=True,
+    )
+
+    course_title = serializers.CharField(
+        source="course.title",
+        read_only=True,
+    )
+
+    course_slug = serializers.CharField(
+        source="course.slug",
+        read_only=True,
+    )
+
+    progress_percentage = serializers.IntegerField(
+        source="course_progress.progress_percentage",
+        read_only=True,
+    )
+
+    completed_lectures = serializers.IntegerField(
+        source="course_progress.completed_lectures",
+        read_only=True,
+    )
+
+    total_lectures = serializers.IntegerField(
+        source="course_progress.total_lectures",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Enrollment
+
+        fields = (
+            "id",
+            "student_name",
+            "student_email",
+            "course_title",
+            "course_slug",
+            "status",
+            "progress_percentage",
+            "completed_lectures",
+            "total_lectures",
+            "certificate_issued",
+            "is_active",
+            "enrolled_at",
+        )
+
+        read_only_fields = fields
+
+
+class EnrollmentDetailSerializer(
+    serializers.ModelSerializer,
+):
+    student_name = serializers.CharField(
+        source="student.get_full_name",
+        read_only=True,
+    )
+
+    student_email = serializers.EmailField(
+        source="student.email",
+        read_only=True,
+    )
+
+    course_title = serializers.CharField(
+        source="course.title",
+        read_only=True,
+    )
+
+    course_slug = serializers.CharField(
+        source="course.slug",
+        read_only=True,
+    )
+
+    progress_percentage = serializers.IntegerField(
+        source="course_progress.progress_percentage",
+        read_only=True,
+    )
+
+    completed_lectures = serializers.IntegerField(
+        source="course_progress.completed_lectures",
+        read_only=True,
+    )
+
+    total_lectures = serializers.IntegerField(
+        source="course_progress.total_lectures",
+        read_only=True,
+    )
+
+    total_sections = serializers.IntegerField(
+        source="course_progress.total_sections",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Enrollment
+
+        fields = (
+            "id",
+            "student",
+            "student_name",
+            "student_email",
+            "course",
+            "course_title",
+            "course_slug",
+            "status",
+            "progress_percentage",
+            "completed_lectures",
+            "total_lectures",
+            "total_sections",
+            "certificate_issued",
+            "is_active",
+            "enrolled_at",
+            "started_at",
+            "completed_at",
+            "expires_at",
+            "last_accessed_at",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = fields
+
+
+class CreateEnrollmentSerializer(
+    serializers.ModelSerializer,
+):
+    class Meta:
+        model = Enrollment
+
+        fields = (
+            "course",
+        )
+
+    def validate(
+        self,
+        attrs,
+    ):
+        student = self.context[
+            "request"
+        ].user
+
+        course = attrs["course"]
+
+        if not course.is_active:
+            raise serializers.ValidationError(
+                {
+                    "course": (
+                        "This course is inactive."
+                    )
+                }
+            )
+
+        if not course.is_published:
+            raise serializers.ValidationError(
+                {
+                    "course": (
+                        "This course is not published."
+                    )
+                }
+            )
+
+        if course.status != CourseStatus.PUBLISHED:
+            raise serializers.ValidationError(
+                {
+                    "course": (
+                        "This course is not available "
+                        "for enrollment."
+                    )
+                }
+            )
+
+        existing_enrollment = (
+            Enrollment.objects.filter(
+                student=student,
+                course=course,
+            ).first()
+        )
+
+        if existing_enrollment:
+            if existing_enrollment.is_active:
+                raise serializers.ValidationError(
+                    {
+                        "course": (
+                            "You are already enrolled "
+                            "in this course."
+                        )
+                    }
+                )
+
+        return attrs
+
+    def create(
+        self,
+        validated_data,
+    ):
+        student = self.context[
+            "request"
+        ].user
+
+        return create_enrollment(
+            validated_data={
+                **validated_data,
+                "student": student,
+            },
+        )
+
+
+class UpdateEnrollmentSerializer(
+    serializers.ModelSerializer,
+):
+    class Meta:
+        model = Enrollment
+
+        fields = (
+            "status",
+            "expires_at",
+            "last_accessed_at",
+            "is_active",
+            "certificate_issued",
+        )
+
+    def update(
+        self,
+        instance,
+        validated_data,
+    ):
+        status = validated_data.get(
+            "status"
+        )
+
+        if status == EnrollmentStatus.ACTIVE:
+            activate_enrollment(
+                enrollment=instance,
+            )
+
+        elif (
+            status
+            == EnrollmentStatus.COMPLETED
+        ):
+            complete_enrollment(
+                enrollment=instance,
+            )
+
+        elif (
+            status
+            == EnrollmentStatus.CANCELLED
+        ):
+            cancel_enrollment(
+                enrollment=instance,
+            )
+
+        if validated_data.pop(
+            "certificate_issued",
+            False,
+        ):
+            issue_certificate(
+                enrollment=instance,
+            )
+
+        for (
+            field,
+            value,
+        ) in validated_data.items():
+            setattr(
+                instance,
+                field,
+                value,
+            )
+
+        instance.save()
+
+        return instance
+
+
+# ==========================================================
+# Lesson Progress Serializers
+# ==========================================================
+
+
+class LessonProgressSerializer(
+    serializers.ModelSerializer,
+):
+    lecture_title = serializers.CharField(
+        source="lecture.title",
+        read_only=True,
+    )
+
+    section_title = serializers.CharField(
+        source="lecture.section.title",
+        read_only=True,
+    )
+
+    course_title = serializers.CharField(
+        source="lecture.section.course.title",
+        read_only=True,
+    )
+
+    class Meta:
+        model = LessonProgress
+
+        fields = (
+            "id",
+            "enrollment",
+            "lecture",
+            "lecture_title",
+            "section_title",
+            "course_title",
+            "last_watched_second",
+            "watch_percentage",
+            "is_completed",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = (
+            "id",
+            "enrollment",
+            "lecture",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        )
+
+
+class CreateLessonProgressSerializer(
+    serializers.ModelSerializer,
+):
+    class Meta:
+        model = LessonProgress
+
+        fields = (
+            "enrollment",
+            "lecture",
+            "last_watched_second",
+            "watch_percentage",
+        )
+
+        validators = []
+
+    def validate(
+        self,
+        attrs,
+    ):
+        request = self.context[
+            "request"
+        ]
+
+        enrollment = attrs["enrollment"]
+        lecture = attrs["lecture"]
+
+        if enrollment.student != request.user:
+            raise serializers.ValidationError(
+                {
+                    "enrollment": (
+                        "You do not own this enrollment."
+                    )
+                }
+            )
+
+        if not enrollment.is_active:
+            raise serializers.ValidationError(
+                {
+                    "enrollment": (
+                        "This enrollment is inactive."
+                    )
+                }
+            )
+
+        if (
+            lecture.section.course
+            != enrollment.course
+        ):
+            raise serializers.ValidationError(
+                {
+                    "lecture": (
+                        "Lecture does not belong "
+                        "to this course."
+                    )
+                }
+            )
+
+        if not lecture.is_active:
+            raise serializers.ValidationError(
+                {
+                    "lecture": (
+                        "This lecture is inactive."
+                    )
+                }
+            )
+
+        if not lecture.is_published:
+            raise serializers.ValidationError(
+                {
+                    "lecture": (
+                        "This lecture is not published."
+                    )
+                }
+            )
+
+        return attrs
+
+    def create(
+        self,
+        validated_data,
+    ):
+        return create_lesson_progress(
+            validated_data=validated_data,
+        )
+
+
+class UpdateLessonProgressSerializer(
+    serializers.ModelSerializer,
+):
+    class Meta:
+        model = LessonProgress
+
+        fields = (
+            "last_watched_second",
+            "watch_percentage",
+        )
+
+    def validate(
+        self,
+        attrs,
+    ):
+        watch_percentage = attrs.get(
+            "watch_percentage"
+        )
+
+        if watch_percentage is not None:
+            if not 0 <= watch_percentage <= 100:
+                raise serializers.ValidationError(
+                    {
+                        "watch_percentage": (
+                            "Watch percentage must "
+                            "be between 0 and 100."
+                        )
+                    }
+                )
+
+        return attrs
+
+    def update(
+        self,
+        instance,
+        validated_data,
+    ):
+        return update_lesson_progress(
+            lesson_progress=instance,
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Course Progress Serializers
+# ==========================================================
+
+
+class CourseProgressSerializer(
+    serializers.ModelSerializer,
+):
+    student_name = serializers.CharField(
+        source="enrollment.student.get_full_name",
+        read_only=True,
+    )
+
+    student_email = serializers.EmailField(
+        source="enrollment.student.email",
+        read_only=True,
+    )
+
+    course_title = serializers.CharField(
+        source="enrollment.course.title",
+        read_only=True,
+    )
+
+    last_completed_lecture_title = (
+        serializers.CharField(
+            source="last_completed_lecture.title",
+            read_only=True,
+        )
+    )
+
+    class Meta:
+        model = CourseProgress
+
+        fields = (
+            "id",
+            "course_title",
+            "student_name",
+            "student_email",
+            "completed_sections",
+            "completed_lectures",
+            "total_sections",
+            "total_lectures",
+            "progress_percentage",
+            "last_completed_lecture",
+            "last_completed_lecture_title",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = fields
+
+
+class UpdateCourseProgressSerializer(
+    serializers.Serializer,
+):
+    def update(
+        self,
+        instance,
+        validated_data,
+    ):
+        return update_course_completion(
+            enrollment=instance.enrollment,
+        )
+
+    def create(
+        self,
+        validated_data,
+    ):
+        raise NotImplementedError
+
+
+# ==========================================================
+# Enrollment Action Serializers
+# ==========================================================
+
+
+class ActivateEnrollmentSerializer(
+    serializers.Serializer,
+):
+    def update(
+        self,
+        instance,
+        validated_data,
+    ):
+        return activate_enrollment(
+            enrollment=instance,
+        )
+
+    def create(
+        self,
+        validated_data,
+    ):
+        raise NotImplementedError
+
+
+class CompleteEnrollmentSerializer(
+    serializers.Serializer,
+):
+    def update(
+        self,
+        instance,
+        validated_data,
+    ):
+        return complete_enrollment(
+            enrollment=instance,
+        )
+
+    def create(
+        self,
+        validated_data,
+    ):
+        raise NotImplementedError
+
+
+class CancelEnrollmentSerializer(
+    serializers.Serializer,
+):
+    def update(
+        self,
+        instance,
+        validated_data,
+    ):
+        return cancel_enrollment(
+            enrollment=instance,
+        )
+
+    def create(
+        self,
+        validated_data,
+    ):
+        raise NotImplementedError
+
+
+class IssueCertificateSerializer(
+    serializers.Serializer,
+):
+    def update(
+        self,
+        instance,
+        validated_data,
+    ):
+        return issue_certificate(
+            enrollment=instance,
+        )
+
+    def create(
+        self,
+        validated_data,
+    ):
+        raise NotImplementedError
+
+
+============================================================
+FILE: .\backend\apps\enrollments\selectors.py
+============================================================
+from django.shortcuts import get_object_or_404
+
+from .choices import EnrollmentStatus
+from .models import (
+    CourseProgress,
+    Enrollment,
+    LessonProgress,
+)
+
+
+# ==========================================================
+# Enrollment Selectors
+# ==========================================================
+
+
+def get_enrollments():
+    """
+    Retrieve all active enrollments.
+    """
+
+    return (
+        Enrollment.objects.active()
+        .select_related(
+            "student",
+            "course",
+            "course__category",
+            "course__instructor",
+        )
+    )
+
+
+def get_enrollment_by_id(
+    enrollment_id,
+):
+    """
+    Retrieve enrollment by ID.
+    """
+
+    return get_object_or_404(
+        get_enrollments(),
+        id=enrollment_id,
+    )
+
+
+def get_student_enrollments(
+    student,
+):
+    """
+    Retrieve all enrollments of a student.
+    """
+
+    return (
+        get_enrollments()
+        .filter(
+            student=student,
+        )
+    )
+
+
+def get_course_enrollments(
+    course,
+):
+    """
+    Retrieve all enrollments of a course.
+    """
+
+    return (
+        get_enrollments()
+        .filter(
+            course=course,
+        )
+    )
+
+
+def get_completed_enrollments():
+    """
+    Retrieve completed enrollments.
+    """
+
+    return (
+        get_enrollments()
+        .filter(
+            status=EnrollmentStatus.COMPLETED,
+        )
+    )
+
+
+def get_pending_enrollments():
+    """
+    Retrieve pending enrollments.
+    """
+
+    return (
+        get_enrollments()
+        .filter(
+            status=EnrollmentStatus.PENDING,
+        )
+    )
+
+
+def get_active_enrollments():
+    """
+    Retrieve active enrollments.
+    """
+
+    return (
+        get_enrollments()
+        .filter(
+            status=EnrollmentStatus.ACTIVE,
+        )
+    )
+
+
+# ==========================================================
+# Lesson Progress Selectors
+# ==========================================================
+
+
+def get_lesson_progress():
+    """
+    Retrieve all lesson progress records.
+    """
+
+    return (
+        LessonProgress.objects.select_related(
+            "enrollment",
+            "enrollment__student",
+            "enrollment__course",
+            "lecture",
+            "lecture__section",
+        )
+    )
+
+
+def get_lesson_progress_by_id(
+    progress_id,
+):
+    """
+    Retrieve lesson progress by ID.
+    """
+
+    return get_object_or_404(
+        get_lesson_progress(),
+        id=progress_id,
+    )
+
+
+def get_enrollment_lesson_progress(
+    enrollment,
+):
+    """
+    Retrieve all lesson progress of an enrollment.
+    """
+
+    return (
+        get_lesson_progress()
+        .filter(
+            enrollment=enrollment,
+        )
+        .order_by(
+            "lecture__section__order",
+            "lecture__order",
+        )
+    )
+
+
+def get_completed_lessons(
+    enrollment,
+):
+    """
+    Retrieve completed lessons.
+    """
+
+    return (
+        get_enrollment_lesson_progress(
+            enrollment,
+        )
+        .filter(
+            is_completed=True,
+        )
+    )
+
+
+def get_incomplete_lessons(
+    enrollment,
+):
+    """
+    Retrieve incomplete lessons.
+    """
+
+    return (
+        get_enrollment_lesson_progress(
+            enrollment,
+        )
+        .filter(
+            is_completed=False,
+        )
+    )
+
+
+def get_lecture_progress(
+    enrollment,
+    lecture,
+):
+    """
+    Retrieve progress for a specific lecture.
+    """
+
+    return get_object_or_404(
+        LessonProgress,
+        enrollment=enrollment,
+        lecture=lecture,
+    )
+
+
+# ==========================================================
+# Course Progress Selectors
+# ==========================================================
+
+
+def get_course_progress():
+    """
+    Retrieve all course progress records.
+    """
+
+    return (
+        CourseProgress.objects.select_related(
+            "enrollment",
+            "enrollment__student",
+            "enrollment__course",
+            "last_completed_lecture",
+        )
+    )
+
+
+def get_course_progress_by_id(
+    progress_id,
+):
+    """
+    Retrieve course progress by ID.
+    """
+
+    return get_object_or_404(
+        get_course_progress(),
+        id=progress_id,
+    )
+
+
+def get_enrollment_course_progress(
+    enrollment,
+):
+    """
+    Retrieve course progress for an enrollment.
+    """
+
+    return get_object_or_404(
+        get_course_progress(),
+        enrollment=enrollment,
+    )
+
+
+def get_completed_course_progress():
+    """
+    Retrieve completed course progress.
+    """
+
+    return (
+        get_course_progress()
+        .completed()
+    )
+
+
+def get_in_progress_courses():
+    """
+    Retrieve courses that are currently in progress.
+    """
+
+    return (
+        get_course_progress()
+        .in_progress()
+    )
+
+
+def get_not_started_courses():
+    """
+    Retrieve courses that have not been started.
+    """
+
+    return (
+        get_course_progress()
+        .not_started()
+    )
+
+
+============================================================
+FILE: .\backend\apps\enrollments\views.py
+============================================================
+from django_filters.rest_framework import DjangoFilterBackend
+
+from drf_spectacular.utils import extend_schema
+
+from rest_framework import (
+    filters,
+    generics,
+    permissions,
+    status,
+)
+
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from .filters import EnrollmentFilter
+
+from .permissions import (
+    IsAdminOrEnrollmentOwner,
+    IsCourseProgressOwner,
+    IsLessonProgressOwner,
+    IsStudentOrReadOnly,
+)
+
+from .selectors import (
+    get_course_progress,
+    get_enrollment_by_id,
+    get_enrollments,
+    get_lesson_progress,
+)
+
+from .serializers import (
+    ActivateEnrollmentSerializer,
+    CancelEnrollmentSerializer,
+    CompleteEnrollmentSerializer,
+    CourseProgressSerializer,
+    CreateEnrollmentSerializer,
+    CreateLessonProgressSerializer,
+    EnrollmentDetailSerializer,
+    EnrollmentListSerializer,
+    IssueCertificateSerializer,
+    LessonProgressSerializer,
+    UpdateCourseProgressSerializer,
+    UpdateEnrollmentSerializer,
+    UpdateLessonProgressSerializer,
+)
+
+
+# ==========================================================
+# Enrollment List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Enrollments"],
+)
+class EnrollmentListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    filter_backends = (
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    )
+
+    filterset_class = EnrollmentFilter
+
+    search_fields = (
+        "student__first_name",
+        "student__last_name",
+        "student__email",
+        "course__title",
+    )
+
+    ordering_fields = (
+        "enrolled_at",
+        "created_at",
+    )
+
+    ordering = (
+        "-enrolled_at",
+    )
+
+    def get_queryset(self):
+        queryset = (
+            get_enrollments()
+            .select_related(
+                "student",
+                "course",
+                "course_progress",
+            )
+        )
+
+        user = self.request.user
+
+        if user.is_staff:
+            return queryset
+
+        if getattr(
+            user,
+            "role",
+            None,
+        ) == "instructor":
+            return queryset.filter(
+                course__instructor=user,
+            )
+
+        return queryset.filter(
+            student=user,
+        )
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateEnrollmentSerializer
+
+        return EnrollmentListSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [
+                IsStudentOrReadOnly(),
+            ]
+
+        return [
+            permissions.IsAuthenticated(),
+        ]
+
+    def perform_create(
+        self,
+        serializer,
+    ):
+        serializer.save()
+
+
+# ==========================================================
+# Enrollment Detail
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Enrollments"],
+)
+class EnrollmentRetrieveUpdateDestroyAPIView(
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    permission_classes = [
+        permissions.IsAuthenticated,
+        IsAdminOrEnrollmentOwner,
+    ]
+
+    lookup_field = "pk"
+
+    def get_object(self):
+        return get_enrollment_by_id(
+            self.kwargs["pk"],
+        )
+
+    def get_serializer_class(self):
+        if self.request.method in (
+            "PUT",
+            "PATCH",
+        ):
+            return UpdateEnrollmentSerializer
+
+        return EnrollmentDetailSerializer
+
+    def perform_update(
+        self,
+        serializer,
+    ):
+        serializer.save()
+
+    def perform_destroy(
+        self,
+        instance,
+    ):
+        instance.delete()
+
+
+# ==========================================================
+# Lesson Progress List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Lesson Progress"],
+)
+class LessonProgressListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    permission_classes = [
+        permissions.IsAuthenticated,
+    ]
+
+    def get_queryset(self):
+        queryset = (
+            get_lesson_progress()
+            .select_related(
+                "enrollment",
+                "lecture",
+                "lecture__section",
+                "lecture__section__course",
+            )
+        )
+
+        user = self.request.user
+
+        if user.is_staff:
+            return queryset
+
+        return queryset.filter(
+            enrollment__student=user,
+        )
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateLessonProgressSerializer
+
+        return LessonProgressSerializer
+
+    def perform_create(
+        self,
+        serializer,
+    ):
+        serializer.save()
+
+
+# ==========================================================
+# Lesson Progress Retrieve / Update
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Lesson Progress"],
+)
+class LessonProgressRetrieveUpdateAPIView(
+    generics.RetrieveUpdateAPIView,
+):
+    permission_classes = [
+        permissions.IsAuthenticated,
+        IsLessonProgressOwner,
+    ]
+
+    lookup_field = "pk"
+
+    def get_queryset(self):
+        return (
+            get_lesson_progress()
+            .select_related(
+                "enrollment",
+                "lecture",
+                "lecture__section",
+                "lecture__section__course",
+            )
+        )
+
+    def get_serializer_class(self):
+        if self.request.method in (
+            "PUT",
+            "PATCH",
+        ):
+            return UpdateLessonProgressSerializer
+
+        return LessonProgressSerializer
+
+    def perform_update(
+        self,
+        serializer,
+    ):
+        serializer.save()
+
+
+# ==========================================================
+# Course Progress
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Course Progress"],
+)
+class CourseProgressRetrieveUpdateAPIView(
+    generics.RetrieveUpdateAPIView,
+):
+    permission_classes = [
+        permissions.IsAuthenticated,
+        IsCourseProgressOwner,
+    ]
+
+    lookup_field = "pk"
+
+    def get_queryset(self):
+        return (
+            get_course_progress()
+            .select_related(
+                "enrollment",
+                "enrollment__student",
+                "enrollment__course",
+                "last_completed_lecture",
+            )
+        )
+
+    def get_serializer_class(self):
+        if self.request.method in (
+            "PUT",
+            "PATCH",
+        ):
+            return UpdateCourseProgressSerializer
+
+        return CourseProgressSerializer
+
+    def perform_update(
+        self,
+        serializer,
+    ):
+        serializer.save()
+
+
+# ==========================================================
+# Enrollment Actions
+# ==========================================================
+
+
+class BaseEnrollmentActionAPIView(
+    APIView,
+):
+    permission_classes = [
+        permissions.IsAuthenticated,
+        IsAdminOrEnrollmentOwner,
+    ]
+
+    serializer_class = None
+
+    def post(
+        self,
+        request,
+        pk,
+    ):
+        enrollment = get_enrollment_by_id(
+            pk,
+        )
+
+        self.check_object_permissions(
+            request,
+            enrollment,
+        )
+
+        serializer = self.serializer_class(
+            enrollment,
+            data=request.data,
+        )
+
+        serializer.is_valid(
+            raise_exception=True,
+        )
+
+        enrollment = serializer.save()
+
+        return Response(
+            EnrollmentDetailSerializer(
+                enrollment,
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+# ==========================================================
+# Activate Enrollment
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Enrollments"],
+)
+class ActivateEnrollmentAPIView(
+    BaseEnrollmentActionAPIView,
+):
+    serializer_class = (
+        ActivateEnrollmentSerializer
+    )
+
+
+# ==========================================================
+# Complete Enrollment
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Enrollments"],
+)
+class CompleteEnrollmentAPIView(
+    BaseEnrollmentActionAPIView,
+):
+    serializer_class = (
+        CompleteEnrollmentSerializer
+    )
+
+
+# ==========================================================
+# Cancel Enrollment
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Enrollments"],
+)
+class CancelEnrollmentAPIView(
+    BaseEnrollmentActionAPIView,
+):
+    serializer_class = (
+        CancelEnrollmentSerializer
+    )
+
+
+# ==========================================================
+# Issue Certificate
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Enrollments"],
+)
+class IssueCertificateAPIView(
+    BaseEnrollmentActionAPIView,
+):
+    permission_classes = [
+        permissions.IsAdminUser,
+    ]
+
+    serializer_class = (
+        IssueCertificateSerializer
+    )
+
+
+============================================================
+FILE: .\backend\apps\enrollments\urls.py
+============================================================
+from django.urls import path
+
+from .views import (
+    ActivateEnrollmentAPIView,
+    CancelEnrollmentAPIView,
+    CompleteEnrollmentAPIView,
+    CourseProgressRetrieveUpdateAPIView,
+    EnrollmentListCreateAPIView,
+    EnrollmentRetrieveUpdateDestroyAPIView,
+    IssueCertificateAPIView,
+    LessonProgressListCreateAPIView,
+    LessonProgressRetrieveUpdateAPIView,
+)
+
+app_name = "enrollments"
+
+
+urlpatterns = [
+    # ==========================================================
+    # Enrollments
+    # ==========================================================
+
+    path(
+        "",
+        EnrollmentListCreateAPIView.as_view(),
+        name="enrollment-list-create",
+    ),
+
+    path(
+        "<uuid:pk>/",
+        EnrollmentRetrieveUpdateDestroyAPIView.as_view(),
+        name="enrollment-detail",
+    ),
+
+    # ==========================================================
+    # Lesson Progress
+    # ==========================================================
+    # ==========================================================
+    # Lesson Progress
+    # ==========================================================
+
+    path(
+        "lesson-progress/",
+        LessonProgressListCreateAPIView.as_view(),
+        name="lesson-progress-list-create",
+    ),
+
+    path(
+        "lesson-progress/<uuid:pk>/",
+        LessonProgressRetrieveUpdateAPIView.as_view(),
+        name="lesson-progress-detail",
+    ),
+
+    # ==========================================================
+    # Course Progress
+    # ==========================================================
+
+    path(
+        "course-progress/<uuid:pk>/",
+        CourseProgressRetrieveUpdateAPIView.as_view(),
+        name="course-progress-detail",
+    ),
+
+    # ==========================================================
+    # Enrollment Actions
+    # ==========================================================
+
+    path(
+        "<uuid:pk>/activate/",
+        ActivateEnrollmentAPIView.as_view(),
+        name="activate-enrollment",
+    ),
+
+    path(
+        "<uuid:pk>/complete/",
+        CompleteEnrollmentAPIView.as_view(),
+        name="complete-enrollment",
+    ),
+
+    path(
+        "<uuid:pk>/cancel/",
+        CancelEnrollmentAPIView.as_view(),
+        name="cancel-enrollment",
+    ),
+
+    path(
+        "<uuid:pk>/issue-certificate/",
+        IssueCertificateAPIView.as_view(),
+        name="issue-certificate",
+    ),
+]
+
+
+============================================================
+FILE: .\backend\apps\courses\serializers.py
+============================================================
+from rest_framework import serializers
+
+from .models import (
+    Category,
+    Course,
+    CourseFeature,
+    LearningOutcome,
+    Lecture,
+    Requirement,
+    Resource,
+    Section,
+)
+from .services import (
+    create_category,
+    create_course,
+    create_lecture,
+    create_resource,
+    create_section,
+    update_category,
+    update_course,
+    update_lecture,
+    update_resource,
+    update_section,
+)
+
+
+# ==========================================================
+# Category Serializer
+# ==========================================================
+
+
+class CategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Category
+
+        fields = (
+            "id",
+            "name",
+            "slug",
+            "description",
+            "icon",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = (
+            "id",
+            "slug",
+            "created_at",
+            "updated_at",
+        )
+
+    def create(self, validated_data):
+        return create_category(
+            validated_data=validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        return update_category(
+            category=instance,
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Course Feature Serializer
+# ==========================================================
+
+
+class CourseFeatureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CourseFeature
+
+        fields = (
+            "id",
+            "title",
+        )
+
+        read_only_fields = (
+            "id",
+        )
+
+
+# ==========================================================
+# Learning Outcome Serializer
+# ==========================================================
+
+
+class LearningOutcomeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LearningOutcome
+
+        fields = (
+            "id",
+            "title",
+        )
+
+        read_only_fields = (
+            "id",
+        )
+
+
+# ==========================================================
+# Requirement Serializer
+# ==========================================================
+
+
+class RequirementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Requirement
+
+        fields = (
+            "id",
+            "title",
+        )
+
+        read_only_fields = (
+            "id",
+        )
+
+
+# ==========================================================
+# Resource Serializer
+# ==========================================================
+
+
+class ResourceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Resource
+
+        fields = (
+            "id",
+            "title",
+            "resource_type",
+            "file",
+            "external_url",
+            "order",
+            "is_active",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = (
+            "id",
+            "created_at",
+            "updated_at",
+        )
+
+    def create(self, validated_data):
+        return create_resource(
+            validated_data=validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        return update_resource(
+            resource=instance,
+            validated_data=validated_data,
+        )
+
+# ==========================================================
+# Lecture Serializer
+# ==========================================================
+
+
+class LectureSerializer(serializers.ModelSerializer):
+    resources = ResourceSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    class Meta:
+        model = Lecture
+
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "description",
+            "video_url",
+            "duration",
+            "order",
+            "is_preview",
+            "is_active",
+            "is_published",
+            "resources",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = (
+            "id",
+            "slug",
+            "created_at",
+            "updated_at",
+        )
+
+    def create(self, validated_data):
+        return create_lecture(
+            validated_data=validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        return update_lecture(
+            lecture=instance,
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Section Serializer
+# ==========================================================
+
+
+class SectionSerializer(serializers.ModelSerializer):
+    lectures = LectureSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    class Meta:
+        model = Section
+
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "description",
+            "order",
+            "is_active",
+            "is_published",
+            "lectures",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = (
+            "id",
+            "slug",
+            "created_at",
+            "updated_at",
+        )
+
+    def create(self, validated_data):
+        return create_section(
+            validated_data=validated_data,
+        )
+
+    def update(self, instance, validated_data):
+        return update_section(
+            section=instance,
+            validated_data=validated_data,
+        )
+
+# ==========================================================
+# Course List Serializer
+# ==========================================================
+
+
+class CourseListSerializer(serializers.ModelSerializer):
+    category = CategorySerializer(
+        read_only=True,
+    )
+
+    instructor_id = serializers.UUIDField(
+        source="instructor.id",
+        read_only=True,
+    )
+
+    instructor_name = serializers.CharField(
+        source="instructor.full_name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Course
+
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "subtitle",
+            "short_description",
+            "thumbnail",
+            "category",
+            "instructor_id",
+            "instructor_name",
+            "level",
+            "language",
+            "duration",
+            "price",
+            "discount_price",
+            "status",
+            "is_featured",
+            "is_published",
+            "published_at",
+            "created_at",
+        )
+
+        read_only_fields = fields
+
+
+# ==========================================================
+# Course Detail Serializer
+# ==========================================================
+
+
+class CourseDetailSerializer(serializers.ModelSerializer):
+    category = CategorySerializer(
+        read_only=True,
+    )
+
+    instructor_id = serializers.UUIDField(
+        source="instructor.id",
+        read_only=True,
+    )
+
+    instructor_name = serializers.CharField(
+        source="instructor.full_name",
+        read_only=True,
+    )
+
+    instructor_email = serializers.EmailField(
+        source="instructor.email",
+        read_only=True,
+    )
+
+    features = CourseFeatureSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    learning_outcomes = LearningOutcomeSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    requirements = RequirementSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    sections = SectionSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    total_sections = serializers.SerializerMethodField()
+
+    total_lectures = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Course
+
+        fields = (
+            "id",
+            "title",
+            "slug",
+            "subtitle",
+            "short_description",
+            "description",
+            "thumbnail",
+            "intro_video",
+            "category",
+            "instructor_id",
+            "instructor_name",
+            "instructor_email",
+            "level",
+            "language",
+            "duration",
+            "price",
+            "discount_price",
+            "features",
+            "learning_outcomes",
+            "requirements",
+            "sections",
+            "total_sections",
+            "total_lectures",
+            "status",
+            "is_featured",
+            "is_published",
+            "published_at",
+            "meta_title",
+            "meta_description",
+            "created_at",
+            "updated_at",
+        )
+
+        read_only_fields = fields
+
+    def get_total_sections(self, obj):
+        return obj.sections.count()
+
+    def get_total_lectures(self, obj):
+        return Lecture.objects.filter(
+            section__course=obj,
+        ).count()
+
+# ==========================================================
+# Create Course Serializer
+# ==========================================================
+
+
+class CreateCourseSerializer(serializers.ModelSerializer):
+    features = CourseFeatureSerializer(
+        many=True,
+        required=False,
+    )
+
+    learning_outcomes = LearningOutcomeSerializer(
+        many=True,
+        required=False,
+    )
+
+    requirements = RequirementSerializer(
+        many=True,
+        required=False,
+    )
+
+    class Meta:
+        model = Course
+
+        fields = (
+            "title",
+            "subtitle",
+            "short_description",
+            "description",
+            "thumbnail",
+            "intro_video",
+            "category",
+            "level",
+            "language",
+            "duration",
+            "price",
+            "discount_price",
+            "features",
+            "learning_outcomes",
+            "requirements",
+            "meta_title",
+            "meta_description",
+        )
+
+    def validate(self, attrs):
+        price = attrs.get("price")
+        discount_price = attrs.get("discount_price")
+
+        if (
+            discount_price is not None
+            and discount_price > price
+        ):
+            raise serializers.ValidationError(
+                {
+                    "discount_price": (
+                        "Discount price cannot be greater than price."
+                    )
+                }
+            )
+
+        return attrs
+
+    def create(self, validated_data):
+        features = validated_data.pop(
+            "features",
+            [],
+        )
+
+        learning_outcomes = validated_data.pop(
+            "learning_outcomes",
+            [],
+        )
+
+        requirements = validated_data.pop(
+            "requirements",
+            [],
+        )
+
+        validated_data["instructor"] = (
+            self.context["request"].user
+        )
+
+        course = create_course(
+            validated_data=validated_data,
+        )
+
+        if features:
+            CourseFeature.objects.bulk_create(
+                [
+                    CourseFeature(
+                        course=course,
+                        **feature,
+                    )
+                    for feature in features
+                ]
+            )
+
+        if learning_outcomes:
+            LearningOutcome.objects.bulk_create(
+                [
+                    LearningOutcome(
+                        course=course,
+                        **item,
+                    )
+                    for item in learning_outcomes
+                ]
+            )
+
+        if requirements:
+            Requirement.objects.bulk_create(
+                [
+                    Requirement(
+                        course=course,
+                        **item,
+                    )
+                    for item in requirements
+                ]
+            )
+
+        return course
+
+# ==========================================================
+# Update Course Serializer
+# ==========================================================
+
+
+class UpdateCourseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Course
+
+        fields = (
+            "title",
+            "subtitle",
+            "short_description",
+            "description",
+            "thumbnail",
+            "intro_video",
+            "category",
+            "level",
+            "language",
+            "duration",
+            "price",
+            "discount_price",
+            "status",
+            "is_featured",
+            "is_published",
+            "is_active",
+            "meta_title",
+            "meta_description",
+        )
+
+    def validate(self, attrs):
+        price = attrs.get(
+            "price",
+            self.instance.price,
+        )
+
+        discount_price = attrs.get(
+            "discount_price",
+            self.instance.discount_price,
+        )
+
+        if (
+            discount_price is not None
+            and discount_price > price
+        ):
+            raise serializers.ValidationError(
+                {
+                    "discount_price": (
+                        "Discount price cannot be greater than price."
+                    )
+                }
+            )
+
+        return attrs
+
+    def update(self, instance, validated_data):
+        return update_course(
+            course=instance,
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Create Section Serializer
+# ==========================================================
+
+
+class CreateSectionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Section
+
+        fields = (
+            "course",
+            "title",
+            "description",
+            "order",
+            "is_active",
+            "is_published",
+        )
+
+    def create(self, validated_data):
+        return create_section(
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Update Section Serializer
+# ==========================================================
+
+
+class UpdateSectionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Section
+
+        fields = (
+            "title",
+            "description",
+            "order",
+            "is_active",
+            "is_published",
+        )
+
+    def update(self, instance, validated_data):
+        return update_section(
+            section=instance,
+            validated_data=validated_data,
+        )
+
+# ==========================================================
+# Create Lecture Serializer
+# ==========================================================
+
+
+class CreateLectureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Lecture
+
+        fields = (
+            "section",
+            "title",
+            "description",
+            "video_url",
+            "duration",
+            "order",
+            "is_preview",
+            "is_active",
+            "is_published",
+        )
+
+    def create(self, validated_data):
+        return create_lecture(
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Update Lecture Serializer
+# ==========================================================
+
+
+class UpdateLectureSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Lecture
+
+        fields = (
+            "title",
+            "description",
+            "video_url",
+            "duration",
+            "order",
+            "is_preview",
+            "is_active",
+            "is_published",
+        )
+
+    def update(self, instance, validated_data):
+        return update_lecture(
+            lecture=instance,
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Create Resource Serializer
+# ==========================================================
+
+
+class CreateResourceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Resource
+
+        fields = (
+            "lecture",
+            "title",
+            "resource_type",
+            "file",
+            "external_url",
+            "order",
+            "is_active",
+        )
+
+    def create(self, validated_data):
+        return create_resource(
+            validated_data=validated_data,
+        )
+
+
+# ==========================================================
+# Update Resource Serializer
+# ==========================================================
+
+
+class UpdateResourceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Resource
+
+        fields = (
+            "title",
+            "resource_type",
+            "file",
+            "external_url",
+            "order",
+            "is_active",
+        )
+
+    def update(self, instance, validated_data):
+        return update_resource(
+            resource=instance,
+            validated_data=validated_data,
+        )
+
+
+
+============================================================
+FILE: .\backend\apps\courses\selectors.py
+============================================================
+from django.shortcuts import get_object_or_404
+
+from .choices import CourseStatus
+from .models import (
+    Category,
+    Course,
+    Lecture,
+    Resource,
+    Section,
+)
+
+
+# ==========================================================
+# Category Selectors
+# ==========================================================
+
+
+def get_categories():
+    """
+    Retrieve all active categories.
+    """
+
+    return Category.objects.active()
+
+
+def get_category_by_id(category_id):
+    """
+    Retrieve category by ID.
+    """
+
+    return get_object_or_404(
+        get_categories(),
+        id=category_id,
+    )
+
+
+def get_category_by_slug(slug):
+    """
+    Retrieve category by slug.
+    """
+
+    return get_object_or_404(
+        get_categories(),
+        slug=slug,
+    )
+
+
+# ==========================================================
+# Course Selectors
+# ==========================================================
+
+
+def get_courses():
+    """
+    Retrieve all active courses.
+    """
+
+    return (
+        Course.objects.active()
+        .select_related(
+            "category",
+            "instructor",
+        )
+        .prefetch_related(
+            "features",
+            "learning_outcomes",
+            "requirements",
+            "sections",
+        )
+    )
+
+
+def get_course_by_id(course_id):
+    """
+    Retrieve course by ID.
+    """
+
+    return get_object_or_404(
+        get_courses(),
+        id=course_id,
+    )
+
+
+def get_course_by_slug(slug):
+    """
+    Retrieve course by slug.
+    """
+
+    return get_object_or_404(
+        get_courses(),
+        slug=slug,
+    )
+
+
+def get_published_courses():
+    """
+    Retrieve published courses.
+    """
+
+    return (
+        get_courses()
+        .filter(
+            status=CourseStatus.PUBLISHED,
+            is_published=True,
+        )
+    )
+
+
+def get_featured_courses():
+    """
+    Retrieve featured courses.
+    """
+
+    return (
+        get_published_courses()
+        .filter(
+            is_featured=True,
+        )
+    )
+
+
+# ==========================================================
+# Course Utility Selectors
+# ==========================================================
+
+
+def get_instructor_courses(instructor):
+    """
+    Retrieve all courses created by an instructor.
+    """
+
+    return (
+        get_courses()
+        .filter(
+            instructor=instructor,
+        )
+    )
+
+
+def get_category_courses(category):
+    """
+    Retrieve all published courses in a category.
+    """
+
+    return (
+        get_published_courses()
+        .filter(
+            category=category,
+        )
+    )
+
+
+# ==========================================================
+# Section Selectors
+# ==========================================================
+
+
+def get_sections():
+    """
+    Retrieve all active sections.
+    """
+
+    return (
+        Section.objects.active()
+        .select_related(
+            "course",
+        )
+        .prefetch_related(
+            "lectures",
+        )
+    )
+
+
+def get_section_by_id(section_id):
+    """
+    Retrieve section by ID.
+    """
+
+    return get_object_or_404(
+        get_sections(),
+        id=section_id,
+    )
+
+
+def get_section_by_slug(slug):
+    """
+    Retrieve section by slug.
+    """
+
+    return get_object_or_404(
+        get_sections(),
+        slug=slug,
+    )
+
+
+def get_course_sections(course):
+    """
+    Retrieve all sections of a course.
+    """
+
+    return (
+        get_sections()
+        .filter(
+            course=course,
+        )
+        .order_by(
+            "order",
+        )
+    )
+
+
+def get_published_sections(course):
+    """
+    Retrieve published sections of a course.
+    """
+
+    return (
+        get_course_sections(
+            course,
+        )
+        .filter(
+            is_published=True,
+        )
+    )
+
+# ==========================================================
+# Lecture Selectors
+# ==========================================================
+
+
+def get_lectures():
+    """
+    Retrieve all active lectures.
+    """
+
+    return (
+        Lecture.objects.active()
+        .select_related(
+            "section",
+            "section__course",
+        )
+        .prefetch_related(
+            "resources",
+        )
+    )
+
+
+def get_lecture_by_id(lecture_id):
+    """
+    Retrieve lecture by ID.
+    """
+
+    return get_object_or_404(
+        get_lectures(),
+        id=lecture_id,
+    )
+
+
+def get_lecture_by_slug(slug):
+    """
+    Retrieve lecture by slug.
+    """
+
+    return get_object_or_404(
+        get_lectures(),
+        slug=slug,
+    )
+
+
+def get_section_lectures(section):
+    """
+    Retrieve lectures of a section.
+    """
+
+    return (
+        get_lectures()
+        .filter(
+            section=section,
+        )
+        .order_by(
+            "order",
+        )
+    )
+
+
+def get_preview_lectures():
+    """
+    Retrieve preview lectures.
+    """
+
+    return (
+        get_lectures()
+        .filter(
+            is_preview=True,
+            is_published=True,
+        )
+    )
+
+
+# ==========================================================
+# Resource Selectors
+# ==========================================================
+
+
+def get_resources():
+    """
+    Retrieve all active resources.
+    """
+
+    return (
+        Resource.objects.filter(
+            is_active=True,
+        )
+        .select_related(
+            "lecture",
+            "lecture__section",
+            "lecture__section__course",
+        )
+    )
+
+
+def get_resource_by_id(resource_id):
+    """
+    Retrieve resource by ID.
+    """
+
+    return get_object_or_404(
+        get_resources(),
+        id=resource_id,
+    )
+
+
+def get_lecture_resources(lecture):
+    """
+    Retrieve resources of a lecture.
+    """
+
+    return (
+        get_resources()
+        .filter(
+            lecture=lecture,
+        )
+        .order_by(
+            "order",
+        )
+    )
+
+
+def get_resource_by_type(resource_type):
+    """
+    Retrieve resources by type.
+    """
+
+    return (
+        get_resources()
+        .filter(
+            resource_type=resource_type,
+        )
+    )
+
+
+============================================================
+FILE: .\backend\apps\courses\views.py
+============================================================
+from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.utils import (
+    OpenApiResponse,
+    extend_schema,
+)
+from rest_framework import (
+    filters,
+    generics,
+    permissions,
+)
+
+from .filters import CourseFilter
+from .models import (
+    Category,
+)
+from .permissions import (
+    IsAdminOrCourseOwner,
+    IsInstructorOrReadOnly,
+)
+from .selectors import (
+    get_courses,
+)
+from .serializers import (
+    CategorySerializer,
+    CourseDetailSerializer,
+    CourseListSerializer,
+    CreateCourseSerializer,
+    UpdateCourseSerializer,
+)
+
+
+# ==========================================================
+# Category List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Categories"],
+    summary="List Categories",
+    description="Retrieve all active course categories.",
+    responses={
+        200: CategorySerializer(many=True),
+    },
+)
+class CategoryListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    queryset = Category.objects.active()
+
+    serializer_class = CategorySerializer
+
+    lookup_field = "slug"
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [
+                permissions.IsAdminUser(),
+            ]
+
+        return [
+            permissions.AllowAny(),
+        ]
+
+    @extend_schema(
+        summary="Create Category",
+        description="Create a new course category.",
+        request=CategorySerializer,
+        responses={
+            201: CategorySerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+        },
+    )
+    def create(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().create(
+            request,
+            *args,
+            **kwargs,
+        )
+
+# ==========================================================
+# Category Retrieve / Update / Delete
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Categories"],
+    summary="Category Details",
+    description="Retrieve, update or delete a category.",
+    responses={
+        200: CategorySerializer,
+        404: OpenApiResponse(
+            description="Category not found.",
+        ),
+    },
+)
+class CategoryRetrieveUpdateDestroyAPIView(
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    queryset = Category.objects.active()
+
+    serializer_class = CategorySerializer
+
+    lookup_field = "slug"
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [
+                permissions.AllowAny(),
+            ]
+
+        return [
+            permissions.IsAdminUser(),
+        ]
+
+    @extend_schema(
+        summary="Update Category",
+        description="Update an existing category.",
+        request=CategorySerializer,
+        responses={
+            200: CategorySerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+            404: OpenApiResponse(
+                description="Category not found.",
+            ),
+        },
+    )
+    def patch(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().patch(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    @extend_schema(
+        summary="Replace Category",
+        description="Replace an existing category.",
+        request=CategorySerializer,
+        responses={
+            200: CategorySerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+            404: OpenApiResponse(
+                description="Category not found.",
+            ),
+        },
+    )
+    def put(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().put(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    @extend_schema(
+        summary="Delete Category",
+        description="Delete a category.",
+        responses={
+            204: OpenApiResponse(
+                description="Category deleted successfully.",
+            ),
+            404: OpenApiResponse(
+                description="Category not found.",
+            ),
+        },
+    )
+    def delete(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().delete(
+            request,
+            *args,
+            **kwargs,
+        )
+
+# ==========================================================
+# Course List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Courses"],
+    summary="List Courses",
+    description="Retrieve all published courses or create a new course.",
+    responses={
+        200: CourseListSerializer(many=True),
+    },
+)
+class CourseListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    filter_backends = (
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    )
+
+    filterset_class = CourseFilter
+
+    search_fields = (
+        "title",
+        "subtitle",
+        "description",
+        "category__name",
+        "instructor__first_name",
+        "instructor__last_name",
+    )
+
+    ordering_fields = (
+        "created_at",
+        "published_at",
+        "price",
+        "title",
+    )
+
+    ordering = (
+        "-created_at",
+    )
+
+    def get_queryset(self):
+        queryset = get_courses()
+
+        if not self.request.user.is_authenticated:
+            return queryset.filter(
+                is_active=True,
+                is_published=True,
+            )
+
+        if self.request.user.is_staff:
+            return queryset
+
+        if self.request.user.role == "instructor":
+            return queryset.filter(
+                instructor=self.request.user,
+            )
+
+        return queryset.filter(
+            is_active=True,
+            is_published=True,
+        )
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateCourseSerializer
+
+        return CourseListSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [
+                IsInstructorOrReadOnly(),
+            ]
+
+        return [
+            permissions.AllowAny(),
+        ]
+
+    @extend_schema(
+        summary="Create Course",
+        description="Create a new course.",
+        request=CreateCourseSerializer,
+        responses={
+            201: CourseDetailSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+        },
+    )
+    def create(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().create(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
+# ==========================================================
+# Course Retrieve / Update / Delete
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Courses"],
+    summary="Course Details",
+    description="Retrieve, update or delete a course.",
+    responses={
+        200: CourseDetailSerializer,
+        404: OpenApiResponse(
+            description="Course not found.",
+        ),
+    },
+)
+class CourseRetrieveUpdateDestroyAPIView(
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    queryset = get_courses()
+
+    lookup_field = "slug"
+
+    def get_serializer_class(self):
+        if self.request.method in (
+            "PUT",
+            "PATCH",
+        ):
+            return UpdateCourseSerializer
+
+        return CourseDetailSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [
+                permissions.AllowAny(),
+            ]
+
+        return [
+            permissions.IsAuthenticated(),
+            IsAdminOrCourseOwner(),
+        ]
+
+    @extend_schema(
+        summary="Update Course",
+        description="Partially update a course.",
+        request=UpdateCourseSerializer,
+        responses={
+            200: CourseDetailSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+            403: OpenApiResponse(
+                description="Permission denied.",
+            ),
+            404: OpenApiResponse(
+                description="Course not found.",
+            ),
+        },
+    )
+    def patch(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().patch(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    @extend_schema(
+        summary="Replace Course",
+        description="Replace an existing course.",
+        request=UpdateCourseSerializer,
+        responses={
+            200: CourseDetailSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+            403: OpenApiResponse(
+                description="Permission denied.",
+            ),
+            404: OpenApiResponse(
+                description="Course not found.",
+            ),
+        },
+    )
+    def put(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().put(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    @extend_schema(
+        summary="Delete Course",
+        description="Delete a course.",
+        responses={
+            204: OpenApiResponse(
+                description="Course deleted successfully.",
+            ),
+            403: OpenApiResponse(
+                description="Permission denied.",
+            ),
+            404: OpenApiResponse(
+                description="Course not found.",
+            ),
+        },
+    )
+    def delete(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().delete(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_destroy(self, instance):
+        instance.delete()
+
+
+from .permissions import (
+    IsInstructorOrSectionReadOnly,
+    IsSectionOwner,
+)
+from .selectors import (
+    get_sections,
+)
+from .serializers import (
+    CreateSectionSerializer,
+    SectionSerializer,
+    UpdateSectionSerializer,
+)
+
+
+# ==========================================================
+# Section List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Sections"],
+    summary="List Sections",
+    description="Retrieve all sections or create a new section.",
+)
+class SectionListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    queryset = get_sections()
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateSectionSerializer
+
+        return SectionSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [
+                IsInstructorOrSectionReadOnly(),
+            ]
+
+        return [
+            permissions.AllowAny(),
+        ]
+
+    @extend_schema(
+        summary="Create Section",
+        request=CreateSectionSerializer,
+        responses={
+            201: SectionSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+        },
+    )
+    def create(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().create(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
+# ==========================================================
+# Section Retrieve / Update / Delete
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Sections"],
+    summary="Section Details",
+    description="Retrieve, update or delete a section.",
+)
+class SectionRetrieveUpdateDestroyAPIView(
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    queryset = get_sections()
+
+    lookup_field = "slug"
+
+    def get_serializer_class(self):
+        if self.request.method in (
+            "PUT",
+            "PATCH",
+        ):
+            return UpdateSectionSerializer
+
+        return SectionSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [
+                permissions.AllowAny(),
+            ]
+
+        return [
+            permissions.IsAuthenticated(),
+            IsSectionOwner(),
+        ]
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        instance.delete()
+
+
+from .permissions import (
+    IsInstructorOrLectureReadOnly,
+    IsLectureOwner,
+)
+from .selectors import (
+    get_lectures,
+)
+from .serializers import (
+    CreateLectureSerializer,
+    LectureSerializer,
+    UpdateLectureSerializer,
+)
+
+
+# ==========================================================
+# Lecture List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Lectures"],
+    summary="List Lectures",
+    description="Retrieve all lectures or create a new lecture.",
+)
+class LectureListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    queryset = get_lectures()
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateLectureSerializer
+
+        return LectureSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [
+                IsInstructorOrLectureReadOnly(),
+            ]
+
+        return [
+            permissions.AllowAny(),
+        ]
+
+    @extend_schema(
+        summary="Create Lecture",
+        request=CreateLectureSerializer,
+        responses={
+            201: LectureSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+        },
+    )
+    def create(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().create(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
+# ==========================================================
+# Lecture Retrieve / Update / Delete
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Lectures"],
+    summary="Lecture Details",
+    description="Retrieve, update or delete a lecture.",
+)
+class LectureRetrieveUpdateDestroyAPIView(
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    queryset = get_lectures()
+
+    lookup_field = "slug"
+
+    def get_serializer_class(self):
+        if self.request.method in (
+            "PUT",
+            "PATCH",
+        ):
+            return UpdateLectureSerializer
+
+        return LectureSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [
+                permissions.AllowAny(),
+            ]
+
+        return [
+            permissions.IsAuthenticated(),
+            IsLectureOwner(),
+        ]
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        instance.delete()
+
+
+from .permissions import (
+    IsInstructorOrResourceReadOnly,
+    IsResourceOwner,
+)
+from .selectors import (
+    get_resources,
+)
+from .serializers import (
+    CreateResourceSerializer,
+    ResourceSerializer,
+    UpdateResourceSerializer,
+)
+
+
+# ==========================================================
+# Resource List / Create
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Resources"],
+    summary="List Resources",
+    description="Retrieve all resources or create a new resource.",
+)
+class ResourceListCreateAPIView(
+    generics.ListCreateAPIView,
+):
+    queryset = get_resources()
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return CreateResourceSerializer
+
+        return ResourceSerializer
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [
+                IsInstructorOrResourceReadOnly(),
+            ]
+
+        return [
+            permissions.AllowAny(),
+        ]
+
+    @extend_schema(
+        summary="Create Resource",
+        request=CreateResourceSerializer,
+        responses={
+            201: ResourceSerializer,
+            400: OpenApiResponse(
+                description="Validation error.",
+            ),
+        },
+    )
+    def create(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().create(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
+# ==========================================================
+# Resource Retrieve / Update / Delete
+# ==========================================================
+
+
+@extend_schema(
+    tags=["Resources"],
+    summary="Resource Details",
+    description="Retrieve, update or delete a resource.",
+)
+class ResourceRetrieveUpdateDestroyAPIView(
+    generics.RetrieveUpdateDestroyAPIView,
+):
+    queryset = get_resources()
+
+    serializer_class = ResourceSerializer
+
+    lookup_field = "pk"
+
+    def get_serializer_class(self):
+        if self.request.method in (
+            "PUT",
+            "PATCH",
+        ):
+            return UpdateResourceSerializer
+
+        return ResourceSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [
+                permissions.AllowAny(),
+            ]
+
+        return [
+            permissions.IsAuthenticated(),
+            IsResourceOwner(),
+        ]
+
+    @extend_schema(
+        summary="Update Resource",
+        request=UpdateResourceSerializer,
+        responses={
+            200: ResourceSerializer,
+        },
+    )
+    def patch(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().patch(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    @extend_schema(
+        summary="Replace Resource",
+        request=UpdateResourceSerializer,
+        responses={
+            200: ResourceSerializer,
+        },
+    )
+    def put(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().put(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    @extend_schema(
+        summary="Delete Resource",
+        responses={
+            204: OpenApiResponse(
+                description="Resource deleted successfully.",
+            ),
+        },
+    )
+    def delete(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        return super().delete(
+            request,
+            *args,
+            **kwargs,
+        )
+
+    def perform_destroy(self, instance):
+        instance.delete()
+
+
+
+
+
+============================================================
+FILE: .\backend\apps\courses\urls.py
+============================================================
+from django.urls import path
+
+from .views import (
+    CategoryListCreateAPIView,
+    CategoryRetrieveUpdateDestroyAPIView,
+    CourseListCreateAPIView,
+    CourseRetrieveUpdateDestroyAPIView,
+    LectureListCreateAPIView,
+    LectureRetrieveUpdateDestroyAPIView,
+    ResourceListCreateAPIView,
+    ResourceRetrieveUpdateDestroyAPIView,
+    SectionListCreateAPIView,
+    SectionRetrieveUpdateDestroyAPIView,
+)
+
+app_name = "courses"
+
+urlpatterns = [
+    # ======================================================
+    # Categories
+    # ======================================================
+
+    path(
+        "categories/",
+        CategoryListCreateAPIView.as_view(),
+        name="category-list",
+    ),
+
+    path(
+        "categories/slug:<slug:slug>/",
+        CategoryRetrieveUpdateDestroyAPIView.as_view(),
+        name="category-detail",
+    ),
+
+    # ======================================================
+    # Sections
+    # ======================================================
+
+    path(
+        "sections/",
+        SectionListCreateAPIView.as_view(),
+        name="section-list",
+    ),
+
+    path(
+        "sections/<slug:slug>/",
+        SectionRetrieveUpdateDestroyAPIView.as_view(),
+        name="section-detail",
+    ),
+
+    # ======================================================
+    # Lectures
+    # ======================================================
+
+    path(
+        "lectures/",
+        LectureListCreateAPIView.as_view(),
+        name="lecture-list",
+    ),
+
+    path(
+        "lectures/<slug:slug>/",
+        LectureRetrieveUpdateDestroyAPIView.as_view(),
+        name="lecture-detail",
+    ),
+
+    # ======================================================
+    # Resources
+    # ======================================================
+
+    path(
+        "resources/",
+        ResourceListCreateAPIView.as_view(),
+        name="resource-list",
+    ),
+
+    path(
+        "resources/<uuid:pk>/",
+        ResourceRetrieveUpdateDestroyAPIView.as_view(),
+        name="resource-detail",
+    ),
+
+    # ======================================================
+    # Courses
+    # IMPORTANT: Keep this AFTER sections/lectures/resources
+    # ======================================================
+
+    path(
+        "",
+        CourseListCreateAPIView.as_view(),
+        name="course-list",
+    ),
+
+    path(
+        "<slug:slug>/",
+        CourseRetrieveUpdateDestroyAPIView.as_view(),
+        name="course-detail",
+    ),
+]
+
+
+============================================================
+FILE: .\frontend\src\api\instructor.ts
+============================================================
+import apiClient from "./client";
+
+export interface InstructorDashboard {
+  course_count: number;
+  published_course_count: number;
+  student_count: number;
+  enrollment_count: number;
+  completed_enrollment_count: number;
+  revenue: number;
+}
+
+export interface InstructorCourseCategory {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  icon: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InstructorCourse {
+  id: string;
+  title: string;
+  slug: string;
+  subtitle: string;
+  short_description: string;
+  thumbnail: string | null;
+
+  category: InstructorCourseCategory;
+
+  instructor_id: string;
+  instructor_name: string;
+
+  level: string;
+  language: string;
+
+  duration: number;
+
+  price: number | string;
+  discount_price: number | string | null;
+
+  status: string;
+  is_featured: boolean;
+  is_published: boolean;
+
+  published_at: string | null;
+  created_at: string;
+}
+
+export const getInstructorDashboard =
+  async (): Promise<InstructorDashboard> => {
+    const response =
+      await apiClient.get<InstructorDashboard>(
+        "/instructor/dashboard/",
+      );
+
+    return response.data;
+  };
+
+export const getInstructorCourses =
+  async (): Promise<InstructorCourse[]> => {
+    const response = await apiClient.get<
+      InstructorCourse[] | {
+        results: InstructorCourse[];
+      }
+    >("/instructor/courses/");
+
+    if (Array.isArray(response.data)) {
+      return response.data;
+    }
+
+    return response.data.results ?? [];
+  };
+
+
+============================================================
+FILE: .\frontend\src\pages\instructor\InstructorDashboardPage.tsx
+============================================================
+import { useEffect, useState } from "react";
+import {
+  AlertCircle,
+  BookOpen,
+  CheckCircle2,
+  GraduationCap,
+  Loader2,
+  RefreshCw,
+  Users,
+  Wallet,
+} from "lucide-react";
+import { Link } from "react-router-dom";
+
+import {
+  getInstructorDashboard,
+  type InstructorDashboard,
+} from "../../api/instructor";
+
+function InstructorDashboardPage() {
+  const [dashboard, setDashboard] =
+    useState<InstructorDashboard | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const loadDashboard = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      const data = await getInstructorDashboard();
+
+      setDashboard(data);
+    } catch (err: any) {
+      console.error(
+        "Instructor dashboard error:",
+        err,
+      );
+
+      if (err?.response?.status === 403) {
+        setError(
+          "You do not have permission to access the instructor dashboard.",
+        );
+      } else {
+        setError(
+          "Unable to load the instructor dashboard. Please try again.",
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDashboard();
+  }, []);
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-slate-50">
+        <div className="mx-auto flex min-h-[70vh] max-w-7xl items-center justify-center px-4">
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+
+            <p className="text-sm font-medium text-slate-500">
+              Loading instructor dashboard...
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="min-h-screen bg-slate-50">
+        <div className="mx-auto max-w-xl px-4 py-12">
+          <div className="rounded-2xl border border-red-200 bg-white p-6 text-center shadow-sm">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
+              <AlertCircle className="h-6 w-6 text-red-600" />
+            </div>
+
+            <h1 className="mt-4 text-xl font-bold text-slate-900">
+              Unable to load dashboard
+            </h1>
+
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              {error}
+            </p>
+
+            <button
+              type="button"
+              onClick={loadDashboard}
+              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-indigo-700"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Try Again
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!dashboard) {
+    return null;
+  }
+
+  const completionRate =
+    dashboard.enrollment_count > 0
+      ? Math.round(
+          (dashboard.completed_enrollment_count /
+            dashboard.enrollment_count) *
+            100,
+        )
+      : 0;
+
+  return (
+    <main className="min-h-screen bg-slate-50">
+      <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        {/* Header */}
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-indigo-600">
+              Instructor Portal
+            </p>
+
+            <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
+              Instructor Dashboard
+            </h1>
+
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+              Manage your courses, students, and learning
+              performance from one place.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={loadDashboard}
+            className="inline-flex min-h-10 items-center justify-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 sm:self-auto"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </button>
+        </div>
+
+        {/* Statistics */}
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            title="My Courses"
+            value={dashboard.course_count}
+            description={`${dashboard.published_course_count} published`}
+            icon={BookOpen}
+            iconClass="bg-indigo-50 text-indigo-600"
+          />
+
+          <StatCard
+            title="Students"
+            value={dashboard.student_count}
+            description={`${dashboard.enrollment_count} enrollments`}
+            icon={Users}
+            iconClass="bg-blue-50 text-blue-600"
+          />
+
+          <StatCard
+            title="Completed"
+            value={dashboard.completed_enrollment_count}
+            description={`${completionRate}% completion rate`}
+            icon={CheckCircle2}
+            iconClass="bg-emerald-50 text-emerald-600"
+          />
+
+          <StatCard
+            title="Revenue"
+            value={`৳${Number(
+              dashboard.revenue,
+            ).toLocaleString()}`}
+            description="Total course revenue"
+            icon={Wallet}
+            iconClass="bg-amber-50 text-amber-600"
+          />
+        </section>
+
+        {/* Main content */}
+        <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {/* Course overview */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 lg:col-span-2">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-900">
+                  Course Overview
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Your current course publishing status.
+                </p>
+              </div>
+
+              <BookOpen className="h-5 w-5 text-indigo-600" />
+            </div>
+
+            <div className="mt-6 space-y-5">
+              <ProgressRow
+                label="Published Courses"
+                value={dashboard.published_course_count}
+                total={dashboard.course_count}
+                color="bg-indigo-600"
+              />
+
+              <ProgressRow
+                label="Student Completion"
+                value={
+                  dashboard.completed_enrollment_count
+                }
+                total={dashboard.enrollment_count}
+                color="bg-emerald-500"
+              />
+            </div>
+          </div>
+
+          {/* Revenue */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-50">
+              <Wallet className="h-5 w-5 text-amber-600" />
+            </div>
+
+            <p className="mt-5 text-sm font-semibold text-slate-500">
+              Total Revenue
+            </p>
+
+            <p className="mt-1 text-3xl font-extrabold tracking-tight text-slate-900">
+              ৳
+              {Number(
+                dashboard.revenue,
+              ).toLocaleString()}
+            </p>
+
+            <div className="mt-5 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-3">
+              <GraduationCap className="h-4 w-4 text-indigo-600" />
+
+              <span className="text-xs font-semibold text-slate-600">
+                Keep creating quality courses for your
+                students.
+              </span>
+            </div>
+          </div>
+        </section>
+
+        {/* Instructor Workspace */}
+        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div>
+            <h2 className="text-lg font-extrabold text-slate-900">
+              Instructor Workspace
+            </h2>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Manage your teaching activities from one place.
+            </p>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <WorkspaceCard
+              icon={BookOpen}
+              title="My Courses"
+              description="Create and manage your courses"
+              to="/instructor/courses"
+            />
+
+            <WorkspaceCard
+              icon={Users}
+              title="Students"
+              description="View your enrolled students"
+              to="/instructor/students"
+            />
+
+            <WorkspaceCard
+              icon={CheckCircle2}
+              title="Assignments"
+              description="Review and grade submissions"
+              to="/instructor/assignments"
+            />
+
+            <WorkspaceCard
+              icon={GraduationCap}
+              title="Quizzes"
+              description="Manage course assessments"
+              to="/instructor/quizzes"
+            />
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+interface StatCardProps {
+  title: string;
+  value: string | number;
+  description: string;
+  icon: React.ComponentType<{
+    className?: string;
+  }>;
+  iconClass: string;
+}
+
+function StatCard({
+  title,
+  value,
+  description,
+  icon: Icon,
+  iconClass,
+}: StatCardProps) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-500">
+            {title}
+          </p>
+
+          <p className="mt-2 text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
+            {value}
+          </p>
+        </div>
+
+        <div
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconClass}`}
+        >
+          <Icon className="h-5 w-5" />
+        </div>
+      </div>
+
+      <p className="mt-4 text-xs font-medium text-slate-400">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+interface ProgressRowProps {
+  label: string;
+  value: number;
+  total: number;
+  color: string;
+}
+
+function ProgressRow({
+  label,
+  value,
+  total,
+  color,
+}: ProgressRowProps) {
+  const percentage =
+    total > 0
+      ? Math.min(Math.round((value / total) * 100), 100)
+      : 0;
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="text-sm font-semibold text-slate-700">
+          {label}
+        </span>
+
+        <span className="text-sm font-bold text-slate-900">
+          {percentage}%
+        </span>
+      </div>
+
+      <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className={`h-full rounded-full transition-all ${color}`}
+          style={{
+            width: `${percentage}%`,
+          }}
+        />
+      </div>
+
+      <p className="mt-2 text-xs text-slate-400">
+        {value} of {total}
+      </p>
+    </div>
+  );
+}
+
+interface WorkspaceCardProps {
+  icon: React.ComponentType<{
+    className?: string;
+  }>;
+  title: string;
+  description: string;
+  to: string;
+}
+
+function WorkspaceCard({
+  icon: Icon,
+  title,
+  description,
+  to,
+}: WorkspaceCardProps) {
+  return (
+    <Link
+      to={to}
+      className="group rounded-xl border border-slate-200 bg-slate-50 p-4 transition hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50 hover:shadow-sm"
+    >
+      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white shadow-sm transition group-hover:shadow">
+        <Icon className="h-5 w-5 text-indigo-600" />
+      </div>
+
+      <h3 className="mt-4 text-sm font-bold text-slate-900">
+        {title}
+      </h3>
+
+      <p className="mt-1 text-xs leading-5 text-slate-500">
+        {description}
+      </p>
+
+      <span className="mt-4 inline-flex text-xs font-bold text-indigo-600">
+        Open workspace →
+      </span>
+    </Link>
+  );
+}
+
+export default InstructorDashboardPage;
+
+
+============================================================
+FILE: .\frontend\src\pages\instructor\InstructorCoursesPage.tsx
+============================================================
+import { useEffect, useState } from "react";
+import {
+  ArrowLeft,
+  BookOpen,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  Eye,
+  FileText,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Search,
+  Users,
+} from "lucide-react";
+import { Link } from "react-router-dom";
+
+import {
+  getInstructorCourses,
+  type InstructorCourse,
+} from "../../api/instructor";
+
+function InstructorCoursesPage() {
+  const [courses, setCourses] = useState<
+    InstructorCourse[]
+  >([]);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+
+  const loadCourses = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      const data = await getInstructorCourses();
+
+      setCourses(data);
+    } catch (error: any) {
+      console.error(
+        "Instructor courses error:",
+        error,
+      );
+
+      if (error?.response?.status === 403) {
+        setError(
+          "You do not have permission to access instructor courses.",
+        );
+      } else {
+        setError(
+          "Unable to load your courses. Please try again.",
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCourses();
+  }, []);
+
+  const filteredCourses = courses.filter((course) => {
+    const query = search.trim().toLowerCase();
+
+    if (!query) {
+      return true;
+    }
+
+    return (
+      course.title.toLowerCase().includes(query) ||
+      course.subtitle
+        ?.toLowerCase()
+        .includes(query) ||
+      course.category?.name
+        ?.toLowerCase()
+        .includes(query)
+    );
+  });
+
+  const publishedCount = courses.filter(
+    (course) => course.is_published,
+  ).length;
+
+  const draftCount =
+    courses.length - publishedCount;
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-slate-50">
+        <div className="flex min-h-[70vh] items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+
+            <p className="text-sm font-medium text-slate-500">
+              Loading your courses...
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="min-h-screen bg-slate-50">
+        <div className="mx-auto max-w-xl px-4 py-12">
+          <div className="rounded-2xl border border-red-200 bg-white p-6 text-center shadow-sm">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
+              <FileText className="h-6 w-6 text-red-600" />
+            </div>
+
+            <h1 className="mt-4 text-xl font-extrabold text-slate-900">
+              Unable to load courses
+            </h1>
+
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              {error}
+            </p>
+
+            <button
+              type="button"
+              onClick={loadCourses}
+              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-indigo-700"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Try Again
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-50">
+      <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        {/* Header */}
+        <div className="flex flex-col gap-5">
+          <Link
+            to="/instructor"
+            className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-slate-500 transition hover:text-indigo-600"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Dashboard
+          </Link>
+
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-sm font-bold text-indigo-600">
+                Instructor Workspace
+              </p>
+
+              <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
+                My Courses
+              </h1>
+
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+                Manage and monitor the courses you teach
+                on EduCore.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700"
+            >
+              <Plus className="h-4 w-4" />
+              Create Course
+            </button>
+          </div>
+        </div>
+
+        {/* Summary */}
+        <div className="mt-7 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <SummaryCard
+            label="Total Courses"
+            value={courses.length}
+            icon={BookOpen}
+            iconClass="bg-indigo-50 text-indigo-600"
+          />
+
+          <SummaryCard
+            label="Published"
+            value={publishedCount}
+            icon={CheckCircle2}
+            iconClass="bg-emerald-50 text-emerald-600"
+          />
+
+          <SummaryCard
+            label="Drafts"
+            value={draftCount}
+            icon={FileText}
+            iconClass="bg-amber-50 text-amber-600"
+          />
+        </div>
+
+        {/* Search */}
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+
+            <input
+              type="search"
+              value={search}
+              onChange={(event) =>
+                setSearch(event.target.value)
+              }
+              placeholder="Search your courses..."
+              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm font-medium text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-50"
+            />
+          </div>
+        </div>
+
+        {/* Courses */}
+        <section className="mt-6">
+          {filteredCourses.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100">
+                <BookOpen className="h-6 w-6 text-slate-400" />
+              </div>
+
+              <h2 className="mt-4 text-lg font-extrabold text-slate-900">
+                {search
+                  ? "No courses found"
+                  : "You have no courses yet"}
+              </h2>
+
+              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+                {search
+                  ? "Try a different search term."
+                  : "Create your first course to start teaching on EduCore."}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              {filteredCourses.map((course) => (
+                <CourseCard
+                  key={course.id}
+                  course={course}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </main>
+  );
+}
+
+interface SummaryCardProps {
+  label: string;
+  value: number;
+  icon: React.ComponentType<{
+    className?: string;
+  }>;
+  iconClass: string;
+}
+
+function SummaryCard({
+  label,
+  value,
+  icon: Icon,
+  iconClass,
+}: SummaryCardProps) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-semibold text-slate-500">
+            {label}
+          </p>
+
+          <p className="mt-1 text-2xl font-extrabold text-slate-900">
+            {value}
+          </p>
+        </div>
+
+        <div
+          className={`flex h-11 w-11 items-center justify-center rounded-xl ${iconClass}`}
+        >
+          <Icon className="h-5 w-5" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CourseCard({
+  course,
+}: {
+  course: InstructorCourse;
+}) {
+  const price = Number(course.price);
+  const discountPrice =
+    course.discount_price !== null
+      ? Number(course.discount_price)
+      : null;
+
+  return (
+    <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      {/* Thumbnail */}
+      <div className="relative aspect-[16/8] overflow-hidden bg-slate-100">
+        {course.thumbnail ? (
+          <img
+            src={course.thumbnail}
+            alt={course.title}
+            className="h-full w-full object-cover transition duration-300 hover:scale-[1.02]"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-indigo-50 to-violet-100">
+            <BookOpen className="h-10 w-10 text-indigo-300" />
+          </div>
+        )}
+
+        <div className="absolute left-4 top-4">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold shadow-sm ${
+              course.is_published
+                ? "bg-emerald-500 text-white"
+                : "bg-white text-slate-700"
+            }`}
+          >
+            {course.is_published ? (
+              <CheckCircle2 className="h-3.5 w-3.5" />
+            ) : (
+              <FileText className="h-3.5 w-3.5" />
+            )}
+
+            {course.is_published
+              ? "Published"
+              : "Draft"}
+          </span>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-wide text-indigo-600">
+              {course.category?.name ?? "Course"}
+            </p>
+
+            <h2 className="mt-1.5 line-clamp-2 text-lg font-extrabold leading-6 text-slate-900">
+              {course.title}
+            </h2>
+
+            {course.subtitle && (
+              <p className="mt-1.5 line-clamp-2 text-sm leading-5 text-slate-500">
+                {course.subtitle}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Meta */}
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <MetaItem
+            icon={Clock3}
+            label="Duration"
+            value={`${course.duration} min`}
+          />
+
+          <MetaItem
+            icon={CalendarDays}
+            label="Level"
+            value={formatLabel(course.level)}
+          />
+
+          <MetaItem
+            icon={Users}
+            label="Language"
+            value={formatLabel(course.language)}
+          />
+
+          <MetaItem
+            icon={BookOpen}
+            label="Status"
+            value={formatLabel(course.status)}
+          />
+        </div>
+
+        {/* Footer */}
+        <div className="mt-5 flex flex-col gap-4 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-medium text-slate-400">
+              Course price
+            </p>
+
+            <div className="mt-1 flex items-center gap-2">
+              {discountPrice !== null ? (
+                <>
+                  <span className="text-lg font-extrabold text-slate-900">
+                    ৳{discountPrice.toLocaleString()}
+                  </span>
+
+                  <span className="text-xs font-medium text-slate-400 line-through">
+                    ৳{price.toLocaleString()}
+                  </span>
+                </>
+              ) : (
+                <span className="text-lg font-extrabold text-slate-900">
+                  ৳{price.toLocaleString()}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <Link
+            to={`/courses/${course.slug}`}
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+          >
+            <Eye className="h-4 w-4" />
+            View Course
+          </Link>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function MetaItem({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{
+    className?: string;
+  }>;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-3">
+      <div className="flex items-center gap-2">
+        <Icon className="h-3.5 w-3.5 text-indigo-500" />
+
+        <span className="text-[11px] font-semibold text-slate-400">
+          {label}
+        </span>
+      </div>
+
+      <p className="mt-1 text-xs font-bold text-slate-700">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function formatLabel(value: string) {
+  if (!value) {
+    return "—";
+  }
+
+  return value
+    .replace(/[_-]/g, " ")
+    .replace(/\b\w/g, (letter) =>
+      letter.toUpperCase(),
+    );
+}
+
+export default InstructorCoursesPage;
+
+
+============================================================
+FILE: .\frontend\src\api\enrollments.ts
+============================================================
+import apiClient from "./client";
+
+import type {
+  Enrollment,
+  CourseProgress,
+} from "../types/enrollment";
+
+/* ==========================================================
+   Enrollment APIs
+========================================================== */
+
+export const getEnrollments = async (): Promise<
+  Enrollment[]
+> => {
+  const response =
+    await apiClient.get<Enrollment[]>(
+      "/enrollments/",
+    );
+
+  return response.data;
+};
+
+export const getEnrollment = async (
+  enrollmentId: string,
+): Promise<Enrollment> => {
+  const response =
+    await apiClient.get<Enrollment>(
+      `/enrollments/${enrollmentId}/`,
+    );
+
+  return response.data;
+};
+
+/* ==========================================================
+   Lesson Progress
+========================================================== */
+
+export interface LessonProgress {
+  id: string;
+  enrollment: string;
+  lecture: string;
+  last_watched_second: number;
+  watch_percentage: number;
+  is_completed: boolean;
+  completed_at: string | null;
+}
+
+export interface LessonProgressPayload {
+  enrollment: string;
+  lecture: string;
+  last_watched_second: number;
+  watch_percentage: number;
+}
+
+export const getLessonProgress =
+  async (): Promise<LessonProgress[]> => {
+    const response =
+      await apiClient.get<LessonProgress[]>(
+        "/enrollments/lesson-progress/",
+      );
+
+    return response.data;
+  };
+
+export const createLessonProgress =
+  async (
+    data: LessonProgressPayload,
+  ): Promise<LessonProgress> => {
+    const response =
+      await apiClient.post<LessonProgress>(
+        "/enrollments/lesson-progress/",
+        data,
+      );
+
+    return response.data;
+  };
+
+export const updateLessonProgress =
+  async (
+    progressId: string,
+    data: Partial<LessonProgressPayload>,
+  ): Promise<LessonProgress> => {
+    const response =
+      await apiClient.patch<LessonProgress>(
+        `/enrollments/lesson-progress/${progressId}/`,
+        data,
+      );
+
+    return response.data;
+  };
+
+/* ==========================================================
+   Course Progress
+========================================================== */
+
+export const getCourseProgress =
+  async (
+    progressId: string,
+  ): Promise<CourseProgress> => {
+    const response =
+      await apiClient.get<CourseProgress>(
+        `/enrollments/course-progress/${progressId}/`,
+      );
+
+    return response.data;
+  };
+
+
+============================================================
+FILE: .\frontend\src\pages\dashboard\MyCoursesPage.tsx
+============================================================
+import { Link } from "react-router-dom";
+import { useEnrollments } from "../../hooks/useEnrollments";
+
+function MyCoursesPage() {
+  const {
+    enrollments,
+    loading,
+    error,
+  } = useEnrollments();
+
+  return (
+    <section className="min-h-screen bg-gray-50">
+      {/* ==================================================
+          Header
+      ================================================== */}
+
+      <div className="border-b border-gray-200 bg-white">
+        <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-7 lg:px-8 lg:py-9">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 sm:text-xs">
+                Learning Library
+              </p>
+
+              <h1 className="mt-1 text-xl font-extrabold tracking-tight text-gray-900 sm:text-3xl">
+                My Courses
+              </h1>
+
+              <p className="mt-1 max-w-xl text-xs leading-5 text-gray-500 sm:mt-1.5 sm:text-sm sm:leading-6">
+                Continue where you left off and track your
+                learning progress.
+              </p>
+            </div>
+
+            <Link
+              to="/courses"
+              className="inline-flex min-h-9 w-full items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:min-h-10 sm:w-auto sm:rounded-xl sm:px-5 sm:py-2.5 sm:text-sm"
+            >
+              Browse Courses
+              <span className="ml-1.5">→</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      {/* ==================================================
+          Content
+      ================================================== */}
+
+      <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+        {/* ==================================================
+            Loading
+        ================================================== */}
+
+        {loading && (
+          <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+            {[1, 2, 3].map((item) => (
+              <div
+                key={item}
+                className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm sm:rounded-2xl"
+              >
+                <div className="h-32 animate-pulse bg-gray-200 sm:h-40" />
+
+                <div className="space-y-2.5 p-4 sm:space-y-3 sm:p-5">
+                  <div className="h-4 w-3/4 animate-pulse rounded bg-gray-200 sm:h-5" />
+
+                  <div className="h-3 w-full animate-pulse rounded bg-gray-200" />
+
+                  <div className="h-3 w-2/3 animate-pulse rounded bg-gray-200" />
+
+                  <div className="pt-1">
+                    <div className="h-1.5 w-full animate-pulse rounded-full bg-gray-200 sm:h-2" />
+                  </div>
+
+                  <div className="h-3 w-28 animate-pulse rounded bg-gray-200 sm:h-4" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ==================================================
+            Error
+        ================================================== */}
+
+        {!loading && error && (
+          <div className="rounded-xl border border-red-100 bg-white px-4 py-8 text-center shadow-sm sm:rounded-2xl sm:px-8 sm:py-10">
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-red-50 text-sm font-bold text-red-600">
+              !
+            </div>
+
+            <h2 className="mt-3 text-sm font-bold text-gray-900 sm:text-lg">
+              Unable to load your courses
+            </h2>
+
+            <p className="mt-1 text-xs text-gray-500 sm:text-sm">
+              Please try again later.
+            </p>
+          </div>
+        )}
+
+        {/* ==================================================
+            Empty
+        ================================================== */}
+
+        {!loading &&
+          !error &&
+          enrollments.length === 0 && (
+            <div className="rounded-xl border border-dashed border-gray-300 bg-white px-4 py-9 text-center shadow-sm sm:rounded-2xl sm:px-6 sm:py-12">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-xl sm:h-14 sm:w-14 sm:rounded-2xl sm:text-2xl">
+                📚
+              </div>
+
+              <h2 className="mt-3 text-base font-bold text-gray-900 sm:mt-4 sm:text-xl">
+                No courses yet
+              </h2>
+
+              <p className="mx-auto mt-1.5 max-w-md text-xs leading-5 text-gray-500 sm:text-sm sm:leading-6">
+                You haven't enrolled in any courses.
+                Explore our course library and start learning.
+              </p>
+
+              <Link
+                to="/courses"
+                className="mt-4 inline-flex min-h-9 w-full items-center justify-center rounded-lg bg-indigo-600 px-5 py-2 text-xs font-bold text-white transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:mt-5 sm:min-h-10 sm:w-auto sm:rounded-xl sm:py-2.5 sm:text-sm"
+              >
+                Explore Courses
+              </Link>
+            </div>
+          )}
+
+        {/* ==================================================
+            Course Grid
+        ================================================== */}
+
+        {!loading &&
+          !error &&
+          enrollments.length > 0 && (
+            <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+              {enrollments.map(
+                (enrollment) => {
+                  const progress =
+                    Math.min(
+                      Math.max(
+                        enrollment.progress_percentage,
+                        0,
+                      ),
+                      100,
+                    );
+
+                  const completed =
+                    progress === 100;
+
+                  return (
+                    <Link
+                      key={enrollment.id}
+                      to={`/learning/${enrollment.id}`}
+                      className="group flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:rounded-2xl"
+                    >
+                      {/* ==================================================
+                          Course Visual
+                      ================================================== */}
+
+                      <div className="relative flex h-32 shrink-0 items-center justify-center overflow-hidden bg-gradient-to-br from-indigo-600 via-indigo-500 to-violet-600 sm:h-40">
+                        {/* Decorative shapes */}
+
+                        <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/10 sm:h-28 sm:w-28" />
+
+                        <div className="absolute -bottom-8 -left-7 h-24 w-24 rounded-full bg-white/10 sm:h-28 sm:w-28" />
+
+                        <div className="absolute right-1/4 top-1/4 h-10 w-10 rounded-full bg-white/5 sm:h-12 sm:w-12" />
+
+                        <span className="relative text-4xl font-black tracking-tight text-white/90 sm:text-5xl">
+                          E
+                        </span>
+
+                        {/* Status */}
+
+                        <span
+                          className={`absolute right-2.5 top-2.5 rounded-full px-2 py-0.5 text-[9px] font-bold shadow-sm sm:right-4 sm:top-4 sm:px-2.5 sm:py-1 sm:text-[11px] ${
+                            completed
+                              ? "bg-emerald-500 text-white"
+                              : "bg-white text-indigo-700"
+                          }`}
+                        >
+                          {completed
+                            ? "Completed"
+                            : "In Progress"}
+                        </span>
+                      </div>
+
+                      {/* ==================================================
+                          Information
+                      ================================================== */}
+
+                      <div className="flex flex-1 flex-col p-3.5 sm:p-5">
+                        <div className="flex items-start justify-between gap-2.5">
+                          <h2 className="line-clamp-2 text-sm font-extrabold leading-5 text-gray-900 transition group-hover:text-indigo-600 sm:text-lg sm:leading-6">
+                            {enrollment.course_title}
+                          </h2>
+
+                          <span
+                            className={`shrink-0 text-xs font-extrabold sm:text-sm ${
+                              completed
+                                ? "text-emerald-600"
+                                : "text-indigo-600"
+                            }`}
+                          >
+                            {progress}%
+                          </span>
+                        </div>
+
+                        {/* ==================================================
+                            Progress
+                        ================================================== */}
+
+                        <div className="mt-3 sm:mt-4">
+                          <div className="h-1.5 overflow-hidden rounded-full bg-gray-100 sm:h-2">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                completed
+                                  ? "bg-emerald-500"
+                                  : "bg-indigo-600"
+                              }`}
+                              style={{
+                                width: `${progress}%`,
+                              }}
+                            />
+                          </div>
+
+                          <div className="mt-1 flex items-center justify-between text-[10px] sm:mt-1.5 sm:text-[11px]">
+                            <span className="text-gray-400">
+                              Course progress
+                            </span>
+
+                            <span className="font-semibold text-gray-500">
+                              {progress}%
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* ==================================================
+                            CTA
+                        ================================================== */}
+
+                        <div className="mt-auto pt-3 sm:pt-4">
+                          <div className="border-t border-gray-100 pt-2.5 sm:pt-3">
+                            <span
+                              className={`text-xs font-bold transition sm:text-sm ${
+                                completed
+                                  ? "text-emerald-600 group-hover:text-emerald-700"
+                                  : "text-indigo-600 group-hover:text-indigo-700"
+                              }`}
+                            >
+                              {completed
+                                ? "Review Course"
+                                : "Continue Learning"}
+
+                              <span className="ml-1 transition-transform group-hover:translate-x-0.5">
+                                →
+                              </span>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                },
+              )}
+            </div>
+          )}
+      </div>
+    </section>
+  );
+}
+
+export default MyCoursesPage;
+
+
+============================================================
+FILE: .\frontend\src\routes\index.tsx
+============================================================
+import { createBrowserRouter } from "react-router-dom";
+
+import MainLayout from "../components/layout/MainLayout";
+import ProtectedRoute from "../components/layout/ProtectedRoute";
+
+// ==========================================================
+// Public pages
+// ==========================================================
+
+import HomePage from "../pages/home/HomePage";
+
+import LoginPage from "../pages/auth/LoginPage";
+import RegisterPage from "../pages/auth/RegisterPage";
+
+
+// ==========================================================
+// Dashboard
+// ==========================================================
+
+import DashboardPage from "../pages/dashboard/DashboardPage";
+import MyCoursesPage from "../pages/dashboard/MyCoursesPage";
+import ProfilePage from "../pages/dashboard/ProfilePage";
+
+// ==========================================================
+// Courses
+// ==========================================================
+
+import CoursesPage from "../pages/courses/CoursesPage";
+import CourseDetailsPage from "../pages/courses/CourseDetailsPage";
+
+// ==========================================================
+// Orders
+// ==========================================================
+
+import CheckoutPage from "../pages/orders/CheckoutPage";
+import OrdersPage from "../pages/orders/OrdersPage";
+import OrderDetailsPage from "../pages/orders/OrderDetailsPage";
+
+// ==========================================================
+// Learning
+// ==========================================================
+
+import LearningPage from "../pages/learning/LearningPage";
+import QuizPage from "../pages/learning/QuizPage";
+import QuizResultPage from "../pages/learning/QuizResultPage";
+
+// ==========================================================
+// Other
+// ==========================================================
+
+import NotificationsPage from "../pages/notifications/NotificationsPage";
+import InstructorDashboardPage from "../pages/instructor/InstructorDashboardPage";
+import InstructorCoursesPage from "../pages/instructor/InstructorCoursesPage";
+import AssignmentPage from "../pages/learning/AssignmentPage";
+// ==========================================================
+// Router
+// ==========================================================
+
+const router = createBrowserRouter([
+  {
+    path: "/",
+
+    element: <MainLayout />,
+
+    children: [
+      // ========================================================
+      // HOME
+      // ========================================================
+
+      {
+        index: true,
+        element: <HomePage />,
+      },
+
+      // ========================================================
+      // AUTH
+      // ========================================================
+
+      {
+        path: "login",
+        element: <LoginPage />,
+      },
+
+      {
+        path: "register",
+        element: <RegisterPage />,
+      },
+
+
+      // ========================================================
+      // PROTECTED ROUTES
+      // ========================================================
+
+      {
+        element: <ProtectedRoute />,
+
+        children: [
+          // ======================================================
+          // DASHBOARD
+          // ======================================================
+
+          {
+            path: "dashboard",
+            element: <DashboardPage />,
+          },
+
+          {
+            path: "my-courses",
+            element: <MyCoursesPage />,
+          },
+
+          {
+            path: "profile",
+            element: <ProfilePage />,
+          },
+
+          // ======================================================
+          // COURSES
+          // ======================================================
+
+          {
+            path: "courses",
+            element: <CoursesPage />,
+          },
+
+          {
+            path: "courses/:slug",
+            element: <CourseDetailsPage />,
+          },
+
+          // ======================================================
+          // ORDERS
+          // ======================================================
+
+          {
+            path: "checkout",
+            element: <CheckoutPage />,
+          },
+
+          {
+            path: "orders",
+            element: <OrdersPage />,
+          },
+
+          {
+            path: "orders/:orderId",
+            element: <OrderDetailsPage />,
+          },
+
+          // ======================================================
+          // LEARNING
+          // ======================================================
+
+          {
+            path: "learning/:enrollmentId",
+            element: <LearningPage />,
+          },
+
+          // ======================================================
+          // QUIZ
+          //
+          // IMPORTANT:
+          // Quiz uses ENROLLMENT ID.
+          // ======================================================
+
+          {
+            path:
+              "learning/:enrollmentId/quiz/:quizId",
+            element: <QuizPage />,
+          },
+          
+
+          {
+            path:
+              "learning/:enrollmentId/quiz/:quizId/result",
+            element: <QuizResultPage />,
+          },
+          {
+            path:
+              "learning/:enrollmentId/assignment/:assignmentId",
+            element: <AssignmentPage />,
+          },
+          // ======================================================
+          // NOTIFICATIONS
+          // ======================================================
+
+          {
+            path: "notifications",
+            element: <NotificationsPage />,
+          },
+
+          // ======================================================
+          // INSTRUCTOR
+          // ======================================================
+
+          {
+            path: "instructor",
+            element: <InstructorDashboardPage />,
+          },
+          {
+            path: "instructor/courses",
+            element: <InstructorCoursesPage />,
+          },
+        ],
+      },
+    ],
+  },
+]);
+
+export default router;
+
+
+===== ENROLLMENT MODEL FILES =====
+
+FILE: G:\educore-production-final\educore_final\educore\backend\apps\enrollments\models\course_progress.py
+import uuid
+
+from django.db import models
+from django.db.models import F
+
+from apps.common.models import TimeStampedModel
+from apps.courses.models import Lecture
+
+from ..constants import (
+    DEFAULT_COMPLETED_LECTURES,
+    DEFAULT_COMPLETED_SECTIONS,
+    DEFAULT_COURSE_PROGRESS,
+    DEFAULT_TOTAL_LECTURES,
+    DEFAULT_TOTAL_SECTIONS,
+)
+from ..managers import CourseProgressManager
+from .enrollment import Enrollment
+
+
+class CourseProgress(TimeStampedModel):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    enrollment = models.OneToOneField(
+        Enrollment,
+        on_delete=models.CASCADE,
+        related_name="course_progress",
+    )
+
+    completed_sections = models.PositiveIntegerField(
+        default=DEFAULT_COMPLETED_SECTIONS,
+    )
+
+    completed_lectures = models.PositiveIntegerField(
+        default=DEFAULT_COMPLETED_LECTURES,
+    )
+
+    total_sections = models.PositiveIntegerField(
+        default=DEFAULT_TOTAL_SECTIONS,
+    )
+
+    total_lectures = models.PositiveIntegerField(
+        default=DEFAULT_TOTAL_LECTURES,
+    )
+
+    progress_percentage = models.PositiveSmallIntegerField(
+        default=DEFAULT_COURSE_PROGRESS,
+        db_index=True,
+    )
+
+    last_completed_lecture = models.ForeignKey(
+        Lecture,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="course_progress_records",
+    )
+
+    completed_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    objects = CourseProgressManager()
+
+    class Meta:
+        ordering = [
+            "-updated_at",
+        ]
+
+        verbose_name = "Course Progress"
+        verbose_name_plural = "Course Progress"
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "enrollment",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "progress_percentage",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "completed_at",
+                ],
+            ),
+        ]
+
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(
+                        progress_percentage__gte=0,
+                    )
+                    & models.Q(
+                        progress_percentage__lte=100,
+                    )
+                ),
+                name="valid_course_progress_percentage",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    completed_sections__gte=0,
+                ),
+                name="valid_completed_sections",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    completed_lectures__gte=0,
+                ),
+                name="valid_completed_lectures",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    total_sections__gte=0,
+                ),
+                name="valid_total_sections",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    total_lectures__gte=0,
+                ),
+                name="valid_total_lectures",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    completed_sections__lte=F(
+                        "total_sections",
+                    ),
+                ),
+                name="completed_sections_lte_total_sections",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    completed_lectures__lte=F(
+                        "total_lectures",
+                    ),
+                ),
+                name="completed_lectures_lte_total_lectures",
+            ),
+        ]
+
+    @property
+    def is_completed(self):
+        """
+        Returns True when the course is 100% complete.
+        """
+        return self.progress_percentage >= 100
+
+    @property
+    def completion_rate(self):
+        """
+        Returns the current course completion percentage.
+        """
+        return self.progress_percentage
+
+    def __str__(self):
+        return (
+            f"{self.enrollment.student.email} | "
+            f"{self.enrollment.course.title} | "
+            f"{self.progress_percentage}%"
+        )
+
+FILE: G:\educore-production-final\educore_final\educore\backend\apps\enrollments\models\enrollment.py
+import uuid
+
+from django.conf import settings
+from django.db import models
+
+from apps.common.models import TimeStampedModel
+from apps.courses.models import Course
+
+from ..choices import EnrollmentStatus
+from ..constants import (
+    DEFAULT_CERTIFICATE_ISSUED,
+    DEFAULT_ENROLLMENT_ACTIVE,
+)
+from ..managers import EnrollmentManager
+
+
+class Enrollment(TimeStampedModel):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="enrollments",
+    )
+
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="enrollments",
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=EnrollmentStatus.choices,
+        default=EnrollmentStatus.ACTIVE,
+        db_index=True,
+    )
+
+    enrolled_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    started_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    completed_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    expires_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    last_accessed_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    certificate_issued = models.BooleanField(
+        default=DEFAULT_CERTIFICATE_ISSUED,
+        db_index=True,
+    )
+
+    is_active = models.BooleanField(
+        default=DEFAULT_ENROLLMENT_ACTIVE,
+        db_index=True,
+    )
+
+    objects = EnrollmentManager()
+
+    class Meta:
+        ordering = [
+            "-enrolled_at",
+        ]
+
+        verbose_name = "Enrollment"
+        verbose_name_plural = "Enrollments"
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "student",
+                ]
+            ),
+            models.Index(
+                fields=[
+                    "course",
+                ]
+            ),
+            models.Index(
+                fields=[
+                    "student",
+                    "course",
+                ]
+            ),
+            models.Index(
+                fields=[
+                    "status",
+                ]
+            ),
+            models.Index(
+                fields=[
+                    "is_active",
+                ]
+            ),
+            models.Index(
+                fields=[
+                    "enrolled_at",
+                ]
+            ),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "student",
+                    "course",
+                ],
+                name="unique_student_course_enrollment",
+            ),
+        ]
+
+    @property
+    def is_completed(self):
+        return (
+            self.status
+            == EnrollmentStatus.COMPLETED
+        )
+
+    @property
+    def can_access(self):
+        return (
+            self.is_active
+            and self.status
+            == EnrollmentStatus.ACTIVE
+        )
+
+    def __str__(self):
+        return (
+            f"{self.student.email} → "
+            f"{self.course.title}"
+        )
+
+FILE: G:\educore-production-final\educore_final\educore\backend\apps\enrollments\models\lesson_progress.py
+import uuid
+
+from django.db import models
+
+from apps.common.models import TimeStampedModel
+from apps.courses.models import Lecture
+
+from ..constants import (
+    DEFAULT_LAST_WATCHED_SECOND,
+    DEFAULT_LESSON_COMPLETED,
+    DEFAULT_WATCH_PERCENTAGE,
+)
+from ..managers import LessonProgressManager
+from .enrollment import Enrollment
+
+
+class LessonProgress(TimeStampedModel):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+
+    enrollment = models.ForeignKey(
+        Enrollment,
+        on_delete=models.CASCADE,
+        related_name="lesson_progress",
+    )
+
+    lecture = models.ForeignKey(
+        Lecture,
+        on_delete=models.CASCADE,
+        related_name="lesson_progress",
+    )
+
+    last_watched_second = models.PositiveIntegerField(
+        default=DEFAULT_LAST_WATCHED_SECOND,
+    )
+
+    watch_percentage = models.PositiveSmallIntegerField(
+        default=DEFAULT_WATCH_PERCENTAGE,
+    )
+
+    is_completed = models.BooleanField(
+        default=DEFAULT_LESSON_COMPLETED,
+        db_index=True,
+    )
+
+    completed_at = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+
+    objects = LessonProgressManager()
+
+    class Meta:
+        ordering = [
+            "-updated_at",
+        ]
+
+        verbose_name = "Lesson Progress"
+        verbose_name_plural = "Lesson Progress"
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "enrollment",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "lecture",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "is_completed",
+                ],
+            ),
+            models.Index(
+                fields=[
+                    "watch_percentage",
+                ],
+            ),
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "enrollment",
+                    "lecture",
+                ],
+                name="unique_enrollment_lecture_progress",
+            ),
+
+            models.CheckConstraint(
+                check=(
+                    models.Q(
+                        watch_percentage__gte=0,
+                    )
+                    & models.Q(
+                        watch_percentage__lte=100,
+                    )
+                ),
+                name="valid_watch_percentage",
+            ),
+
+            models.CheckConstraint(
+                check=models.Q(
+                    last_watched_second__gte=0,
+                ),
+                name="valid_last_watched_second",
+            ),
+        ]
+
+    @property
+    def is_finished(self):
+        """
+        Returns True when the lesson is completed.
+        """
+        return self.is_completed or self.watch_percentage >= 100
+
+    def __str__(self):
+        return (
+            f"{self.enrollment.student} - "
+            f"{self.lecture.title}"
+        )
+
+FILE: G:\educore-production-final\educore_final\educore\backend\apps\enrollments\models\__init__.py
+from .course_progress import CourseProgress
+from .enrollment import Enrollment
+from .lesson_progress import LessonProgress
+
+__all__ = [
+    "Enrollment",
+    "LessonProgress",
+    "CourseProgress",
+]
